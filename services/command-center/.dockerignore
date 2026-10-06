@@ -1,0 +1,9 @@
+node_modules
+npm-debug.log
+.git
+.gitignore
+.env.local
+atlas-credentials.env
+scratch
+*.webp
+*.png
