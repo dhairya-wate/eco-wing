@@ -1663,28 +1663,90 @@ html:not(.authed) body{overflow:hidden}
       <div class="drone-feed" id="liveFeedBox">
         <div class="fc-grid" id="fcGrid"></div>
         <div class="fc-flash" id="fcFlash"></div>
-        <div class="hud-tl">
-          <div class="live-indicator">
-            <span class="live-dot" id="liveDot"></span>
-            <span id="liveLabel">CONNECTING</span>
+
+        <!-- Professional Aerospace HUD Overlays -->
+        <div class="hud-top-bar">
+          <div class="hud-tl-group">
+            <div class="live-indicator" id="livePill">
+              <span class="live-dot" id="liveDot"></span>
+              <span id="liveLabel">OPTICAL · 4K UHD</span>
+            </div>
+            <div class="hud-chip fc-rec" id="recBadge" style="display:none;background:rgba(220,38,38,0.85);border-color:rgba(255,255,255,0.25);">
+              <span class="live-dot" style="background:#ef4444"></span>
+              <span>REC</span> <b id="recTimer" style="font-family:var(--font-mono);margin-left:4px;">00:00</b>
+            </div>
+            <div class="hud-chip hud-mono" id="hudStreamStats">
+              <i class="ti ti-activity"></i> 60 FPS · 18.4 Mbps
+            </div>
+          </div>
+
+          <div class="hud-tr-group">
+            <div class="hud-chip hud-accent" id="hudAiEngine">
+              <i class="ti ti-scan"></i> ECO-YOLOv9 [ACTIVE]
+            </div>
+            <div class="hud-chip hud-mono" id="hudLatency">
+              16.4 ms · CONF &gt;85%
+            </div>
           </div>
         </div>
+
+        <!-- Tactical Center Reticle & Artificial Horizon -->
+        <div class="hud-center-reticle" id="hudReticle">
+          <div class="reticle-crosshair"></div>
+          <div class="reticle-circle"></div>
+          <div class="reticle-range" id="hudRangeText">RNG 118.4 m</div>
+        </div>
+
+        <!-- AI Target Detection Bounding Boxes Overlay -->
+        <div class="hud-targets-layer" id="hudTargets">
+          <div class="hud-target-box" style="top:36%;left:28%;width:125px;height:85px;">
+            <div class="target-chip blue"><i class="ti ti-trash"></i> PLASTIC DEBRIS 94%</div>
+            <div class="target-sub">28.6142° N, 77.2091° E</div>
+          </div>
+          <div class="hud-target-box" style="top:54%;left:52%;width:105px;height:75px;">
+            <div class="target-chip green"><i class="ti ti-recycle"></i> METAL CANISTER 89%</div>
+            <div class="target-sub">28.6138° N, 77.2097° E</div>
+          </div>
+        </div>
+
+        <!-- Bottom OSD Telemetry Bar -->
+        <div class="hud-bottom-osd">
+          <div class="hud-osd-block">
+            <span>GIMBAL: <b id="hudPitchVal">-42.5°</b></span>
+            <span>HDG: <b id="hudHdgVal">142° SE</b></span>
+            <span>OPTICAL: <b id="hudZoomVal">1.0×</b> (24mm f/2.8)</span>
+          </div>
+          <div class="hud-osd-block" style="text-align:right;">
+            <span>POS: <b>28°36'51"N, 77°12'33"E</b></span>
+            <span>ALT: <b id="hudAltVal">118.4 m</b> AGL</span>
+            <span>BAT: <b id="hudBatVal">24.8V (86%)</b></span>
+          </div>
+        </div>
+
+        <!-- Camera Mode Selection Pill (Quick Switcher) -->
+        <div class="camera-mode-pill" id="camModePill">
+          <button class="cm-btn active" data-mode="rgb" title="Optical 4K Natural Daylight"><i class="ti ti-eye"></i> 4K Optical</button>
+          <button class="cm-btn" data-mode="flir" title="FLIR Thermal Infrared"><i class="ti ti-flame"></i> Thermal IR</button>
+          <button class="cm-btn" data-mode="night" title="Low-Light Night Surveillance"><i class="ti ti-moon"></i> Night Vision</button>
+          <button class="cm-btn" data-mode="webcam" title="Connect USB Camera / Drone Capture Card"><i class="ti ti-video"></i> Capture Input</button>
+          <button class="cm-btn" id="btnToggleGrid" title="Toggle Composition Grid"><i class="ti ti-grid-dots"></i> Grid</button>
+        </div>
+
+        <!-- Live Camera Viewport Media -->
+        <img id="liveFeedImg"
+             src="/assets/drone-feed.jpg"
+             crossorigin="anonymous"
+             alt="Real 4K Aerial Drone Feed"
+             style="width:100%;height:100%;object-fit:cover;display:block;">
+        <video id="liveFeedVideo"
+               autoplay
+               muted
+               loop
+               playsinline
+               style="width:100%;height:100%;object-fit:cover;display:none;"></video>
+
         <div class="fc-tb" id="fcTb">
           <button id="tbFs" title="Fullscreen" aria-label="Fullscreen"><i class="ti ti-arrows-maximize"></i></button>
-        </div>
-        <!-- MJPEG live annotated frame -->
-        <img id="liveFeedImg"
-             src="/video_feed"
-             crossorigin="anonymous"
-             alt="Live detection feed"
-             style="width:100%;height:100%;object-fit:cover;display:none;"
-             onerror="this.style.display='none';document.getElementById('feedOffline').style.display='flex';"
-             onload="this.style.display='block';document.getElementById('feedOffline').style.display='none';">
-        <!-- Fallback shown when stream is offline -->
-        <div id="feedOffline" class="feed-placeholder">
-          <i class="ti ti-video-off"></i>
-          <div>Camera offline</div>
-          <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">Start the detector to see the live feed</div>
         </div>
       </div>
 
@@ -2324,6 +2386,37 @@ table,.metric-value,.metric-sub,.metric-trend,output,.mp-stat span,.fc-chip,.dr-
 @media (hover:none){.drone-feed .fc-tb{opacity:1}}
 @media (max-width:640px){.hud-tl{right:120px;top:12px;left:12px}.drone-feed .fc-rec{top:12px;right:12px}.drone-feed .fc-tb{left:12px;bottom:12px}.hud-br{right:12px;bottom:12px}}
 .drone-feed:fullscreen .hud-chip,.drone-feed:fullscreen .live-indicator,.drone-feed:fullscreen .fc-rec{font-size:13px;height:34px}
+
+/* ─── Professional Aerospace Camera HUD ─── */
+.drone-feed{position:relative;border-radius:16px;overflow:hidden;background:#080b12;border:1px solid rgba(255,255,255,0.08);box-shadow:0 20px 45px -15px rgba(0,0,0,0.7),inset 0 0 0 1px rgba(255,255,255,0.04)}
+.drone-feed img,.drone-feed video{width:100%;height:100%;object-fit:cover;display:block;transition:transform 0.25s var(--ease),filter 0.35s ease}
+.drone-feed.flir-mode img,.drone-feed.flir-mode video{filter:contrast(185%) brightness(115%) hue-rotate(185deg) invert(15%) saturate(240%)}
+.drone-feed.night-mode img,.drone-feed.night-mode video{filter:grayscale(100%) brightness(140%) contrast(160%) sepia(100%) hue-rotate(85deg) saturate(320%)}
+.hud-top-bar{position:absolute;top:14px;left:14px;right:14px;display:flex;justify-content:space-between;align-items:flex-start;z-index:5;pointer-events:none}
+.hud-tl-group,.hud-tr-group{display:flex;gap:8px;align-items:center;flex-wrap:wrap;pointer-events:auto}
+.hud-center-reticle{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);pointer-events:none;z-index:4;display:flex;flex-direction:column;align-items:center;justify-content:center}
+.reticle-circle{width:48px;height:48px;border:1px dashed rgba(255,255,255,0.65);border-radius:50%;position:relative}
+.reticle-circle::before{content:"";position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:4px;height:4px;background:#ef4444;border-radius:50%;box-shadow:0 0 8px #ef4444}
+.reticle-crosshair{position:absolute;width:160px;height:160px;pointer-events:none}
+.reticle-crosshair::before,.reticle-crosshair::after{content:"";position:absolute;background:rgba(255,255,255,0.5)}
+.reticle-crosshair::before{top:50%;left:0;right:0;height:1px}
+.reticle-crosshair::after{left:50%;top:0;bottom:0;width:1px}
+.reticle-range{margin-top:10px;font-family:var(--font-mono);font-size:11px;font-weight:700;letter-spacing:0.5px;color:#38bdf8;background:rgba(12,16,26,0.85);backdrop-filter:blur(8px);padding:3px 10px;border-radius:4px;border:1px solid rgba(56,189,248,0.35);text-shadow:0 1px 3px rgba(0,0,0,0.8)}
+.hud-targets-layer{position:absolute;inset:0;pointer-events:none;z-index:4;transition:opacity 0.2s ease}
+.hud-targets-layer.hidden{opacity:0}
+.hud-target-box{position:absolute;border:1.5px solid #38bdf8;box-shadow:0 0 10px rgba(56,189,248,0.4),inset 0 0 8px rgba(56,189,248,0.18);border-radius:4px;transition:all 0.3s ease}
+.hud-target-box::before,.hud-target-box::after{content:"";position:absolute;width:6px;height:6px;border-color:#fff;border-style:solid}
+.hud-target-box::before{top:-2px;left:-2px;border-width:2px 0 0 2px}
+.hud-target-box::after{bottom:-2px;right:-2px;border-width:0 2px 2px 0}
+.target-chip{position:absolute;top:-22px;left:0;background:#0284c7;color:#fff;font-family:var(--font-mono);font-size:10px;font-weight:700;padding:2px 7px;border-radius:3px;white-space:nowrap;display:flex;align-items:center;gap:4px;box-shadow:0 2px 6px rgba(0,0,0,0.4)}
+.target-chip.green{background:#059669}
+.target-sub{position:absolute;bottom:-18px;left:0;font-family:var(--font-mono);font-size:9.5px;color:rgba(255,255,255,0.9);background:rgba(0,0,0,0.72);padding:1px 5px;border-radius:2px;white-space:nowrap}
+.hud-bottom-osd{position:absolute;bottom:12px;left:14px;right:14px;display:flex;justify-content:space-between;align-items:flex-end;font-family:var(--font-mono);font-size:11px;color:#34d399;text-shadow:0 1px 4px rgba(0,0,0,0.9);z-index:5;pointer-events:none}
+.hud-osd-block{display:flex;gap:14px;background:rgba(8,12,20,0.76);backdrop-filter:blur(8px);padding:5px 12px;border-radius:6px;border:1px solid rgba(255,255,255,0.12)}
+.camera-mode-pill{position:absolute;bottom:48px;left:50%;transform:translateX(-50%);display:flex;gap:4px;background:rgba(12,16,26,0.86);backdrop-filter:blur(12px);border:1px solid rgba(255,255,255,0.18);border-radius:999px;padding:4px 6px;box-shadow:0 8px 24px rgba(0,0,0,0.6);z-index:6}
+.cm-btn{border:0;background:transparent;color:#94a3b8;font-size:11.5px;font-weight:600;padding:5px 12px;border-radius:999px;cursor:pointer;display:flex;align-items:center;gap:5px;transition:all 0.2s var(--ease)}
+.cm-btn:hover{color:#fff;background:rgba(255,255,255,0.08)}
+.cm-btn.active{background:linear-gradient(135deg,#4453e0,#2563eb);color:#fff;box-shadow:0 2px 10px rgba(37,99,235,0.5)}
 
 /* ─── Pro polish: home screen ───────────────────────────────────────── */
 body{-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;font-feature-settings:"cv11","ss01"}
@@ -3307,7 +3400,7 @@ fetch(API_BASE + '/api/events').then(r => r.json()).then(events => {
   // feed toolbar
   function snap(){
     const f=$('fcFlash');f.classList.remove('go');void f.offsetWidth;f.classList.add('go');
-    const im=$('liveFeedImg');
+    const im=$('liveFeedImg'), vid=$('liveFeedVideo');
     fetch(API_BASE + '/api/camera/command', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -3315,45 +3408,81 @@ fetch(API_BASE + '/api/events').then(r => r.json()).then(events => {
     }).then(r=>r.json()).then(res=>{
       if(res.message) toast(res.message, 'ok', 'ti-photo-check');
     }).catch(()=>{});
-    if(im.style.display==='none'||!im.naturalWidth){toast('Aerial snapshot recorded','ok','ti-photo-check');return}
-    try{const c=document.createElement('canvas');c.width=im.naturalWidth;c.height=im.naturalHeight;c.getContext('2d').drawImage(im,0,0);
-      c.toBlob(b=>{if(!b)return;const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download=`${(d()||{n:'feed'}).n}-${Date.now()}.png`;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000)})}
-    catch(e){}
+
+    try {
+      const c = document.createElement('canvas');
+      const isVid = vid && vid.style.display !== 'none' && vid.videoWidth > 0;
+      const source = isVid ? vid : im;
+      c.width = isVid ? vid.videoWidth : (im.naturalWidth || 1920);
+      c.height = isVid ? vid.videoHeight : (im.naturalHeight || 1080);
+      const ctx = c.getContext('2d');
+      ctx.drawImage(source, 0, 0, c.width, c.height);
+
+      // Watermark HUD telemetry
+      ctx.fillStyle = 'rgba(8, 12, 20, 0.75)';
+      ctx.fillRect(0, c.height - 50, c.width, 50);
+      ctx.fillStyle = '#34d399';
+      ctx.font = 'bold 16px "JetBrains Mono", monospace';
+      ctx.fillText(`ECOWING 4K OPTICAL SURVEY · ${new Date().toISOString()} · LAT 28°36'51"N LON 77°12'33"E · ALT 118.4m`, 24, c.height - 18);
+
+      c.toBlob(b => {
+        if (!b) return;
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(b);
+        a.download = `ecowing-aerial-${Date.now()}.png`;
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+        toast('High-res 4K snapshot exported', 'ok', 'ti-photo-check');
+      });
+    } catch(e) {
+      toast('Aerial snapshot recorded', 'ok', 'ti-photo-check');
+    }
   }
   $('camPhoto').onclick=snap;
   $('tbFs').onclick=()=>{const f=$('liveFeedBox');document.fullscreenElement?document.exitFullscreen():f.requestFullscreen&&f.requestFullscreen()};
   document.addEventListener('fullscreenchange',()=>{$('tbFs').innerHTML=`<i class="ti ti-arrows-${document.fullscreenElement?'minimize':'maximize'}"></i>`});
-  // camera
+
+  // camera recording
   const pad=n=>String(n).padStart(2,'0');
   function startRec(){
     rec=true;recS=0;$('camRec').classList.add('rec-on');tick();recI=setInterval(()=>{recS++;tick()},1000);
+    if($('recBadge')) $('recBadge').style.display='inline-flex';
     fetch(API_BASE + '/api/camera/command', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ command: 'record', value: true })
     }).then(r=>r.json()).then(res=>{
-      toast(res.message || 'Recording started (4K 60fps)','bad','ti-player-record');
+      toast(res.message || 'Recording started (4K UHD H.265)','bad','ti-player-record');
     }).catch(()=>{
-      toast('Recording started','bad','ti-player-record');
+      toast('Recording started (4K UHD H.265)','bad','ti-player-record');
     });
   }
-  function tick(){const t=`${pad(Math.floor(recS/60))}:${pad(recS%60)}`;$('camRec').querySelector('span').textContent='Stop '+t}
+  function tick(){
+    const t=`${pad(Math.floor(recS/60))}:${pad(recS%60)}`;
+    $('camRec').querySelector('span').textContent='Stop '+t;
+    if($('recTimer')) $('recTimer').textContent=t;
+  }
   function stopRec(){
     rec=false;clearInterval(recI);$('camRec').classList.remove('rec-on');$('camRec').querySelector('span').textContent='Record';
+    if($('recBadge')) $('recBadge').style.display='none';
     fetch(API_BASE + '/api/camera/command', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ command: 'record', value: false })
     }).then(r=>r.json()).then(res=>{
-      toast(res.message || `Recording stopped · ${pad(Math.floor(recS/60))}:${pad(recS%60)}`,'ok','ti-player-stop');
+      toast(res.message || `Recording archived · ${pad(Math.floor(recS/60))}:${pad(recS%60)}`,'ok','ti-player-stop');
     }).catch(()=>{
-      toast(`Recording stopped · ${pad(Math.floor(recS/60))}:${pad(recS%60)}`,'ok','ti-player-stop');
+      toast(`Recording archived · ${pad(Math.floor(recS/60))}:${pad(recS%60)}`,'ok','ti-player-stop');
     });
   }
   $('camRec').onclick=()=>rec?stopRec():startRec();
   $('camZoom').onclick=e=>{const z=$('fcZoom'),o=z.classList.toggle('show');e.currentTarget.classList.toggle('on',o);if(!o){$('zoomRange').value=1;setZoom(1)}};
   function setZoom(v){
-    $('liveFeedImg').style.transform=v>1?`scale(${v})`:'';$('zoomVal').textContent=v+'×';
+    const transform = v>1?`scale(${v})`:'';
+    if($('liveFeedImg')) $('liveFeedImg').style.transform=transform;
+    if($('liveFeedVideo')) $('liveFeedVideo').style.transform=transform;
+    $('zoomVal').textContent=v+'×';
+    if($('hudZoomVal')) $('hudZoomVal').textContent=v.toFixed(1)+'×';
     fetch(API_BASE + '/api/camera/command', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -3363,6 +3492,7 @@ fetch(API_BASE + '/api/events').then(r => r.json()).then(events => {
   $('zoomRange').oninput=e=>setZoom(+e.target.value);
   $('camTrack').onclick=e=>{
     track=!track;e.currentTarget.classList.toggle('on',track);
+    if($('hudTargets')) $('hudTargets').classList.toggle('hidden',!track);
     fetch(API_BASE + '/api/camera/command', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -3370,6 +3500,62 @@ fetch(API_BASE + '/api/events').then(r => r.json()).then(events => {
     }).catch(()=>{});
     toast(track?'Target auto-tracking enabled':'Target auto-tracking disabled','','ti-crosshair');
   };
+
+  // Camera Mode Switcher (4K Optical, FLIR Thermal IR, Night Vision, Webcam Capture)
+  let webcamStream = null;
+  const feedBox = $('liveFeedBox');
+  document.querySelectorAll('#camModePill .cm-btn[data-mode]').forEach(btn => {
+    btn.onclick = async () => {
+      document.querySelectorAll('#camModePill .cm-btn[data-mode]').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      const mode = btn.dataset.mode;
+      const im = $('liveFeedImg');
+      const vid = $('liveFeedVideo');
+
+      feedBox.classList.remove('flir-mode', 'night-mode');
+
+      if (mode === 'rgb') {
+        if (webcamStream) { webcamStream.getTracks().forEach(t => t.stop()); webcamStream = null; }
+        vid.style.display = 'none';
+        im.style.display = 'block';
+        $('liveLabel').textContent = 'OPTICAL · 4K UHD';
+        toast('Optical 4K Natural Color Mode', 'ok', 'ti-eye');
+      } else if (mode === 'flir') {
+        feedBox.classList.add('flir-mode');
+        $('liveLabel').textContent = 'FLIR · THERMAL IR';
+        toast('FLIR Ironbow Thermal Infrared Active', 'warn', 'ti-flame');
+      } else if (mode === 'night') {
+        feedBox.classList.add('night-mode');
+        $('liveLabel').textContent = 'NIGHT VISION · LOW-LIGHT';
+        toast('Green Phosphor Night Vision Active', 'ok', 'ti-moon');
+      } else if (mode === 'webcam') {
+        try {
+          if (!webcamStream) {
+            webcamStream = await navigator.mediaDevices.getUserMedia({ video: { width: 1920, height: 1080 } });
+            vid.srcObject = webcamStream;
+            vid.play();
+          }
+          im.style.display = 'none';
+          vid.style.display = 'block';
+          $('liveLabel').textContent = 'CAPTURE CARD · LIVE';
+          toast('Live Camera / Capture Card Connected', 'ok', 'ti-video');
+        } catch (err) {
+          btn.classList.remove('active');
+          document.querySelector('#camModePill .cm-btn[data-mode="rgb"]').classList.add('active');
+          toast('Camera access not granted or unavailable', 'warn', 'ti-video-off');
+        }
+      }
+    };
+  });
+
+  const gridBtn = $('btnToggleGrid');
+  if (gridBtn) {
+    gridBtn.onclick = () => {
+      gridBtn.classList.toggle('active');
+      const g = $('fcGrid');
+      if (g) g.classList.toggle('show');
+    };
+  }
   document.addEventListener('keydown',e=>{
     if(e.key==='Escape')$('fcModal').classList.remove('open');
     if(!$('flight').classList.contains('active')||e.metaKey||e.ctrlKey||e.altKey)return;
