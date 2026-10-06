@@ -2378,6 +2378,10 @@ body{-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;font-f
 @media(prefers-reduced-motion:reduce){.tab-ind{transition:none}.tab-badge.rec::before{animation:none}}
 .mp-zoomhint{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);z-index:1000;padding:9px 16px;border-radius:999px;background:rgba(16,19,28,.78);color:#fff;font-size:13px;font-weight:600;pointer-events:none;opacity:0;transition:opacity .2s;white-space:nowrap;backdrop-filter:blur(6px)}
 .mp-zoomhint.show{opacity:1}
+.leaflet-control-layers{background:rgba(16,20,31,.92)!important;backdrop-filter:blur(10px);border:1px solid rgba(255,255,255,.12)!important;border-radius:10px!important;box-shadow:0 8px 24px rgba(0,0,0,.45)!important;color:#e2e8f0!important;padding:8px 12px!important;font-family:inherit!important;font-size:12px!important}
+.leaflet-control-layers-expanded{padding:10px 14px!important}
+.leaflet-control-layers-toggle{filter:invert(1) brightness(1.6)}
+.leaflet-control-layers label{cursor:pointer;margin-bottom:6px;display:flex;align-items:center;gap:8px;font-weight:500}
 </style>
 
 <script>
@@ -2386,7 +2390,7 @@ let flightMap = null;
 let markersGroup = null;
 let polylineGroup = null;
 
-function initializeFlightMap() {
+async function initializeFlightMap() {
   if (flightMap) return;
   if (typeof L === 'undefined') { const m = document.getElementById('flightMap'); if (m) m.innerHTML = '<div class="lib-fail">The map library could not be loaded. Check your connection and reload the page.</div>'; return; }
   const $ = id => document.getElementById(id);
@@ -2424,7 +2428,55 @@ function initializeFlightMap() {
       }
     }, { passive: false });
   })();
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '© OpenStreetMap contributors', maxZoom: 19 }).addTo(flightMap);
+
+  // Dynamically retrieve Mapbox token from server environment or cache to protect secrets
+  if (!window.MAPBOX_TOKEN) {
+    try {
+      const cfgRes = await fetch('/api/config');
+      const cfgData = await cfgRes.json();
+      if (cfgData && cfgData.mapboxToken) {
+        window.MAPBOX_TOKEN = cfgData.mapboxToken;
+      }
+    } catch (_) {}
+  }
+  const MAPBOX_TOKEN = window.MAPBOX_TOKEN || localStorage.getItem('mapbox_token') || '';
+  const mbAttr = '© <a href="https://www.mapbox.com/about/maps/" target="_blank">Mapbox</a> © <a href="https://www.openstreetmap.org/copyright" target="_blank">OpenStreetMap</a>';
+
+  const osmLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '© OpenStreetMap contributors', maxZoom: 19
+  });
+
+  const baseLayers = {
+    '🌐 OpenStreetMap': osmLayer
+  };
+
+  if (MAPBOX_TOKEN) {
+    const mapboxSatellite = L.tileLayer(`https://api.mapbox.com/styles/v1/mapbox/satellite-streets-v12/tiles/{z}/{x}/{y}?access_token=${MAPBOX_TOKEN}`, {
+      attribution: mbAttr, maxZoom: 20, tileSize: 512, zoomOffset: -1
+    });
+    const mapboxDark = L.tileLayer(`https://api.mapbox.com/styles/v1/mapbox/dark-v11/tiles/{z}/{x}/{y}?access_token=${MAPBOX_TOKEN}`, {
+      attribution: mbAttr, maxZoom: 20, tileSize: 512, zoomOffset: -1
+    });
+    const mapboxStreets = L.tileLayer(`https://api.mapbox.com/styles/v1/mapbox/streets-v12/tiles/{z}/{x}/{y}?access_token=${MAPBOX_TOKEN}`, {
+      attribution: mbAttr, maxZoom: 20, tileSize: 512, zoomOffset: -1
+    });
+    const mapboxOutdoors = L.tileLayer(`https://api.mapbox.com/styles/v1/mapbox/outdoors-v12/tiles/{z}/{x}/{y}?access_token=${MAPBOX_TOKEN}`, {
+      attribution: mbAttr, maxZoom: 20, tileSize: 512, zoomOffset: -1
+    });
+
+    baseLayers['🛰️ Mapbox Satellite'] = mapboxSatellite;
+    baseLayers['🌙 Mapbox Dark'] = mapboxDark;
+    baseLayers['🗺️ Mapbox Streets'] = mapboxStreets;
+    baseLayers['🌲 Mapbox Outdoors'] = mapboxOutdoors;
+
+    // Default to Mapbox Satellite for aerial drone missions
+    mapboxSatellite.addTo(flightMap);
+  } else {
+    osmLayer.addTo(flightMap);
+  }
+
+  L.control.layers(baseLayers, null, { position: 'topright' }).addTo(flightMap);
+
   markersGroup = L.featureGroup().addTo(flightMap);
   const path = L.polyline([], { color: '#185FA5', weight: 2, opacity: 0.7, dashArray: '5, 5' }).addTo(flightMap);
 

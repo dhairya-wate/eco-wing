@@ -91,6 +91,13 @@ app.get('/api/health', async (req, res) => {
   });
 });
 
+// Public Config Endpoint (provides public map tokens securely without committing secrets)
+app.get('/api/config', (req, res) => {
+  res.json({
+    mapboxToken: process.env.MAPBOX_ACCESS_TOKEN || ''
+  });
+});
+
 // Mount modular API routes
 app.use('/api/auth', authRoutes);
 app.use('/api/drone', droneRoutes);
