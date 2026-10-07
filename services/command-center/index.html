@@ -1661,83 +1661,34 @@ html:not(.authed) body{overflow:hidden}
     <div class="fc-strip" id="fcStrip" role="status" aria-live="polite"></div>
     <div class="drone-control-section">
       <div class="drone-feed" id="liveFeedBox">
-        <div class="fc-grid" id="fcGrid"></div>
         <div class="fc-flash" id="fcFlash"></div>
 
-        <!-- Professional Aerospace HUD Overlays -->
+        <!-- Live Camera Status Pill -->
         <div class="hud-top-bar">
           <div class="hud-tl-group">
             <div class="live-indicator" id="livePill">
-              <span class="live-dot" id="liveDot"></span>
-              <span id="liveLabel">OPTICAL · 4K UHD</span>
+              <span class="live-dot" id="liveDot" style="background:var(--text-muted);box-shadow:none;"></span>
+              <span id="liveLabel">NO DRONE CONNECTED</span>
             </div>
             <div class="hud-chip fc-rec" id="recBadge" style="display:none;background:rgba(220,38,38,0.85);border-color:rgba(255,255,255,0.25);">
               <span class="live-dot" style="background:#ef4444"></span>
               <span>REC</span> <b id="recTimer" style="font-family:var(--font-mono);margin-left:4px;">00:00</b>
             </div>
-            <div class="hud-chip hud-mono" id="hudStreamStats">
-              <i class="ti ti-activity"></i> 60 FPS · 18.4 Mbps
-            </div>
-          </div>
-
-          <div class="hud-tr-group">
-            <div class="hud-chip hud-accent" id="hudAiEngine">
-              <i class="ti ti-scan"></i> ECO-YOLOv9 [ACTIVE]
-            </div>
-            <div class="hud-chip hud-mono" id="hudLatency">
-              16.4 ms · CONF &gt;85%
-            </div>
           </div>
         </div>
 
-        <!-- Tactical Center Reticle & Artificial Horizon -->
-        <div class="hud-center-reticle" id="hudReticle">
-          <div class="reticle-crosshair"></div>
-          <div class="reticle-circle"></div>
-          <div class="reticle-range" id="hudRangeText">RNG 118.4 m</div>
+        <!-- Plain Empty State -->
+        <div class="camera-empty-state" id="cameraEmptyState">
+          <i class="ti ti-video-off" style="font-size:36px;color:var(--text-muted);opacity:0.4;margin-bottom:10px;"></i>
+          <span style="font-family:var(--font-mono, monospace);font-size:12px;letter-spacing:0.12em;color:var(--text-muted);text-transform:uppercase;">No Drone Camera Feed</span>
         </div>
 
-        <!-- AI Target Detection Bounding Boxes Overlay -->
-        <div class="hud-targets-layer" id="hudTargets">
-          <div class="hud-target-box" style="top:36%;left:28%;width:125px;height:85px;">
-            <div class="target-chip blue"><i class="ti ti-trash"></i> PLASTIC DEBRIS 94%</div>
-            <div class="target-sub">28.6142° N, 77.2091° E</div>
-          </div>
-          <div class="hud-target-box" style="top:54%;left:52%;width:105px;height:75px;">
-            <div class="target-chip green"><i class="ti ti-recycle"></i> METAL CANISTER 89%</div>
-            <div class="target-sub">28.6138° N, 77.2097° E</div>
-          </div>
-        </div>
-
-        <!-- Bottom OSD Telemetry Bar -->
-        <div class="hud-bottom-osd">
-          <div class="hud-osd-block">
-            <span>GIMBAL: <b id="hudPitchVal">-42.5°</b></span>
-            <span>HDG: <b id="hudHdgVal">142° SE</b></span>
-            <span>OPTICAL: <b id="hudZoomVal">1.0×</b> (24mm f/2.8)</span>
-          </div>
-          <div class="hud-osd-block" style="text-align:right;">
-            <span>POS: <b>28°36'51"N, 77°12'33"E</b></span>
-            <span>ALT: <b id="hudAltVal">118.4 m</b> AGL</span>
-            <span>BAT: <b id="hudBatVal">24.8V (86%)</b></span>
-          </div>
-        </div>
-
-        <!-- Camera Mode Selection Pill (Quick Switcher) -->
-        <div class="camera-mode-pill" id="camModePill">
-          <button class="cm-btn active" data-mode="rgb" title="Optical 4K Natural Daylight"><i class="ti ti-eye"></i> 4K Optical</button>
-          <button class="cm-btn" data-mode="flir" title="FLIR Thermal Infrared"><i class="ti ti-flame"></i> Thermal IR</button>
-          <button class="cm-btn" data-mode="night" title="Low-Light Night Surveillance"><i class="ti ti-moon"></i> Night Vision</button>
-          <button class="cm-btn" data-mode="webcam" title="Connect USB Camera / Drone Capture Card"><i class="ti ti-video"></i> Capture Input</button>
-          <button class="cm-btn" id="btnToggleGrid" title="Toggle Composition Grid"><i class="ti ti-grid-dots"></i> Grid</button>
-        </div>
-
-        <!-- Live Camera Viewport Media -->
+        <!-- Live Camera Viewport Media (Plain Empty until live feed received) -->
         <img id="liveFeedImg"
-             src="/assets/drone-feed.jpg"
+             src=""
              crossorigin="anonymous"
-             alt="Real 4K Aerial Drone Feed"
-             style="width:100%;height:100%;object-fit:cover;display:block;">
+             alt="Live Drone Feed"
+             style="width:100%;height:100%;object-fit:cover;display:none;">
         <video id="liveFeedVideo"
                autoplay
                muted
@@ -2390,33 +2341,8 @@ table,.metric-value,.metric-sub,.metric-trend,output,.mp-stat span,.fc-chip,.dr-
 /* ─── Professional Aerospace Camera HUD ─── */
 .drone-feed{position:relative;border-radius:16px;overflow:hidden;background:#080b12;border:1px solid rgba(255,255,255,0.08);box-shadow:0 20px 45px -15px rgba(0,0,0,0.7),inset 0 0 0 1px rgba(255,255,255,0.04)}
 .drone-feed img,.drone-feed video{width:100%;height:100%;object-fit:cover;display:block;transition:transform 0.25s var(--ease),filter 0.35s ease}
-.drone-feed.flir-mode img,.drone-feed.flir-mode video{filter:contrast(185%) brightness(115%) hue-rotate(185deg) invert(15%) saturate(240%)}
-.drone-feed.night-mode img,.drone-feed.night-mode video{filter:grayscale(100%) brightness(140%) contrast(160%) sepia(100%) hue-rotate(85deg) saturate(320%)}
-.hud-top-bar{position:absolute;top:14px;left:14px;right:14px;display:flex;justify-content:space-between;align-items:flex-start;z-index:5;pointer-events:none}
-.hud-tl-group,.hud-tr-group{display:flex;gap:8px;align-items:center;flex-wrap:wrap;pointer-events:auto}
-.hud-center-reticle{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);pointer-events:none;z-index:4;display:flex;flex-direction:column;align-items:center;justify-content:center}
-.reticle-circle{width:48px;height:48px;border:1px dashed rgba(255,255,255,0.65);border-radius:50%;position:relative}
-.reticle-circle::before{content:"";position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:4px;height:4px;background:#ef4444;border-radius:50%;box-shadow:0 0 8px #ef4444}
-.reticle-crosshair{position:absolute;width:160px;height:160px;pointer-events:none}
-.reticle-crosshair::before,.reticle-crosshair::after{content:"";position:absolute;background:rgba(255,255,255,0.5)}
-.reticle-crosshair::before{top:50%;left:0;right:0;height:1px}
-.reticle-crosshair::after{left:50%;top:0;bottom:0;width:1px}
-.reticle-range{margin-top:10px;font-family:var(--font-mono);font-size:11px;font-weight:700;letter-spacing:0.5px;color:#38bdf8;background:rgba(12,16,26,0.85);backdrop-filter:blur(8px);padding:3px 10px;border-radius:4px;border:1px solid rgba(56,189,248,0.35);text-shadow:0 1px 3px rgba(0,0,0,0.8)}
-.hud-targets-layer{position:absolute;inset:0;pointer-events:none;z-index:4;transition:opacity 0.2s ease}
-.hud-targets-layer.hidden{opacity:0}
-.hud-target-box{position:absolute;border:1.5px solid #38bdf8;box-shadow:0 0 10px rgba(56,189,248,0.4),inset 0 0 8px rgba(56,189,248,0.18);border-radius:4px;transition:all 0.3s ease}
-.hud-target-box::before,.hud-target-box::after{content:"";position:absolute;width:6px;height:6px;border-color:#fff;border-style:solid}
-.hud-target-box::before{top:-2px;left:-2px;border-width:2px 0 0 2px}
-.hud-target-box::after{bottom:-2px;right:-2px;border-width:0 2px 2px 0}
-.target-chip{position:absolute;top:-22px;left:0;background:#0284c7;color:#fff;font-family:var(--font-mono);font-size:10px;font-weight:700;padding:2px 7px;border-radius:3px;white-space:nowrap;display:flex;align-items:center;gap:4px;box-shadow:0 2px 6px rgba(0,0,0,0.4)}
-.target-chip.green{background:#059669}
-.target-sub{position:absolute;bottom:-18px;left:0;font-family:var(--font-mono);font-size:9.5px;color:rgba(255,255,255,0.9);background:rgba(0,0,0,0.72);padding:1px 5px;border-radius:2px;white-space:nowrap}
-.hud-bottom-osd{position:absolute;bottom:12px;left:14px;right:14px;display:flex;justify-content:space-between;align-items:flex-end;font-family:var(--font-mono);font-size:11px;color:#34d399;text-shadow:0 1px 4px rgba(0,0,0,0.9);z-index:5;pointer-events:none}
-.hud-osd-block{display:flex;gap:14px;background:rgba(8,12,20,0.76);backdrop-filter:blur(8px);padding:5px 12px;border-radius:6px;border:1px solid rgba(255,255,255,0.12)}
-.camera-mode-pill{position:absolute;bottom:48px;left:50%;transform:translateX(-50%);display:flex;gap:4px;background:rgba(12,16,26,0.86);backdrop-filter:blur(12px);border:1px solid rgba(255,255,255,0.18);border-radius:999px;padding:4px 6px;box-shadow:0 8px 24px rgba(0,0,0,0.6);z-index:6}
-.cm-btn{border:0;background:transparent;color:#94a3b8;font-size:11.5px;font-weight:600;padding:5px 12px;border-radius:999px;cursor:pointer;display:flex;align-items:center;gap:5px;transition:all 0.2s var(--ease)}
-.cm-btn:hover{color:#fff;background:rgba(255,255,255,0.08)}
-.cm-btn.active{background:linear-gradient(135deg,#4453e0,#2563eb);color:#fff;box-shadow:0 2px 10px rgba(37,99,235,0.5)}
+.camera-empty-state{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:24px;background:#080b12;z-index:2;user-select:none}
+
 
 /* ─── Pro polish: home screen ───────────────────────────────────────── */
 body{-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;font-feature-settings:"cv11","ss01"}
@@ -2533,40 +2459,30 @@ async function initializeFlightMap() {
     } catch (_) {}
   }
   const MAPBOX_TOKEN = window.MAPBOX_TOKEN || localStorage.getItem('mapbox_token') || '';
-  const mbAttr = '© <a href="https://www.mapbox.com/about/maps/" target="_blank">Mapbox</a> © <a href="https://www.openstreetmap.org/copyright" target="_blank">OpenStreetMap</a>';
+  const mbAttr = '© <a href="https://www.mapbox.com/about/maps/" target="_blank">Mapbox</a>';
 
-  const osmLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    attribution: '© OpenStreetMap contributors', maxZoom: 19
+  const mapboxSatellite = L.tileLayer(`https://api.mapbox.com/styles/v1/mapbox/satellite-streets-v12/tiles/{z}/{x}/{y}?access_token=${MAPBOX_TOKEN}`, {
+    attribution: mbAttr, maxZoom: 20, tileSize: 512, zoomOffset: -1
+  });
+  const mapboxDark = L.tileLayer(`https://api.mapbox.com/styles/v1/mapbox/dark-v11/tiles/{z}/{x}/{y}?access_token=${MAPBOX_TOKEN}`, {
+    attribution: mbAttr, maxZoom: 20, tileSize: 512, zoomOffset: -1
+  });
+  const mapboxStreets = L.tileLayer(`https://api.mapbox.com/styles/v1/mapbox/streets-v12/tiles/{z}/{x}/{y}?access_token=${MAPBOX_TOKEN}`, {
+    attribution: mbAttr, maxZoom: 20, tileSize: 512, zoomOffset: -1
+  });
+  const mapboxOutdoors = L.tileLayer(`https://api.mapbox.com/styles/v1/mapbox/outdoors-v12/tiles/{z}/{x}/{y}?access_token=${MAPBOX_TOKEN}`, {
+    attribution: mbAttr, maxZoom: 20, tileSize: 512, zoomOffset: -1
   });
 
   const baseLayers = {
-    '🌐 OpenStreetMap': osmLayer
+    '🛰️ Mapbox Satellite': mapboxSatellite,
+    '🌙 Mapbox Dark': mapboxDark,
+    '🗺️ Mapbox Streets': mapboxStreets,
+    '🌲 Mapbox Outdoors': mapboxOutdoors
   };
 
-  if (MAPBOX_TOKEN) {
-    const mapboxSatellite = L.tileLayer(`https://api.mapbox.com/styles/v1/mapbox/satellite-streets-v12/tiles/{z}/{x}/{y}?access_token=${MAPBOX_TOKEN}`, {
-      attribution: mbAttr, maxZoom: 20, tileSize: 512, zoomOffset: -1
-    });
-    const mapboxDark = L.tileLayer(`https://api.mapbox.com/styles/v1/mapbox/dark-v11/tiles/{z}/{x}/{y}?access_token=${MAPBOX_TOKEN}`, {
-      attribution: mbAttr, maxZoom: 20, tileSize: 512, zoomOffset: -1
-    });
-    const mapboxStreets = L.tileLayer(`https://api.mapbox.com/styles/v1/mapbox/streets-v12/tiles/{z}/{x}/{y}?access_token=${MAPBOX_TOKEN}`, {
-      attribution: mbAttr, maxZoom: 20, tileSize: 512, zoomOffset: -1
-    });
-    const mapboxOutdoors = L.tileLayer(`https://api.mapbox.com/styles/v1/mapbox/outdoors-v12/tiles/{z}/{x}/{y}?access_token=${MAPBOX_TOKEN}`, {
-      attribution: mbAttr, maxZoom: 20, tileSize: 512, zoomOffset: -1
-    });
-
-    baseLayers['🛰️ Mapbox Satellite'] = mapboxSatellite;
-    baseLayers['🌙 Mapbox Dark'] = mapboxDark;
-    baseLayers['🗺️ Mapbox Streets'] = mapboxStreets;
-    baseLayers['🌲 Mapbox Outdoors'] = mapboxOutdoors;
-
-    // Default to Mapbox Satellite for aerial drone missions
-    mapboxSatellite.addTo(flightMap);
-  } else {
-    osmLayer.addTo(flightMap);
-  }
+  // Default to Mapbox Satellite for aerial drone missions
+  mapboxSatellite.addTo(flightMap);
 
   L.control.layers(baseLayers, null, { position: 'topright' }).addTo(flightMap);
 
@@ -2727,7 +2643,6 @@ function switchTab(button, tabId) {
 // ─── Socket.IO live connection ────────────────────────────────────────────────
 const socket = (typeof io === 'function') ? io(API_BASE || undefined, { reconnectionDelayMax: 10000 }) : { on() {}, connected: false };
 if (typeof io !== 'function') console.warn('socket.io failed to load: live updates disabled');
-if (API_BASE) { const _im = document.getElementById('liveFeedImg'); if (_im) _im.src = API_BASE + '/video_feed'; }
 function escHtml(v) { return String(v == null ? '' : v).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 const feedBody     = document.getElementById('detectionFeed');
 const totalUniqEl  = document.getElementById('totalUnique');
@@ -2738,8 +2653,6 @@ let feedPlaceholderRemoved = false;
 socket.on('connect', () => {
   liveStatusEl.innerHTML = '<i class="ti ti-point-filled"></i> Connected';
   liveStatusEl.style.color = 'var(--success)';
-  document.getElementById('liveLabel').textContent = 'LIVE';
-  document.getElementById('liveDot').style.background = 'var(--success)';
 
   fetch(API_BASE + '/api/stats').then(r => r.json()).then(updateAllStats).catch(() => {});
   fetch(API_BASE + '/api/events').then(r => r.json()).then(events => {
@@ -2753,8 +2666,6 @@ socket.on('connect', () => {
 socket.on('disconnect', () => {
   liveStatusEl.innerHTML = '<i class="ti ti-point-filled"></i> Disconnected';
   liveStatusEl.style.color = 'var(--danger)';
-  document.getElementById('liveLabel').textContent = 'OFFLINE';
-  document.getElementById('liveDot').style.background = 'var(--danger)';
 });
 
 socket.on('new_detection', (event) => {
@@ -3202,7 +3113,7 @@ fetch(API_BASE + '/api/events').then(r => r.json()).then(events => {
   function render(){
     renderFleet();
     const x=d();
-    if(!x){$('droneList').innerHTML='<div class="dr-sub" style="padding:10px 2px">No drones connected.</div>';$('fcStrip').innerHTML='<span class="fc-chip"><i class="ti ti-plug-off"></i>No drone connected</span>';['cmdStart','cmdHold','cmdRth','cmdLand','camPhoto','camRec','camZoom','camTrack'].forEach(i=>$(i).disabled=true);return}
+    if(!x){$('droneList').innerHTML='<div class="dr-sub" style="padding:10px 2px">No drones connected.</div>';$('fcStrip').innerHTML='<span class="fc-chip"><i class="ti ti-plug-off"></i>No drone connected</span>';['cmdStart','cmdHold','cmdRth','cmdLand','camPhoto','camRec','camZoom','camTrack'].forEach(i=>$(i).disabled=true);applyFeed();return}
     const air=AIR.includes(x.st);
     $('droneList').innerHTML=D.map((k,i)=>`<div class="drone-item dr-item${i===cur?' active':''}" data-i="${i}" tabindex="0" role="button" aria-pressed="${i===cur}">
       <div class="dr-top"><span class="drone-item-name"><i class="ti ti-drone"></i>${k.n}</span><span class="drone-status" style="color:${COL[k.st]}">${LBL[k.st]}</span></div>
@@ -3327,7 +3238,55 @@ fetch(API_BASE + '/api/events').then(r => r.json()).then(events => {
     fetch(API_BASE + '/api/drones/' + encodeURIComponent(k.n), { method: 'DELETE' }).catch(()=>{});
     clearTimeout(tm[k.n]);if(rec&&i===cur)stopRec();D.splice(i,1);if(cur>=D.length)cur=Math.max(0,D.length-1);else if(i<cur)cur--;applyFeed();render();toast(k.n+' removed from fleet','warn','ti-trash');
   });
-  function applyFeed(){const im=$('liveFeedImg'),src=(d()&&d().feed)||'/video_feed';if(im.getAttribute('src')!==src)im.src=src}
+  function applyFeed() {
+    const im = $('liveFeedImg');
+    const vid = $('liveFeedVideo');
+    const emptyBox = $('cameraEmptyState');
+    const activeDrone = d();
+
+    if (!activeDrone || !activeDrone.feed) {
+      if (im) {
+        im.removeAttribute('src');
+        im.src = '';
+        im.style.display = 'none';
+      }
+      if (vid) {
+        try { vid.pause(); } catch(_) {}
+        vid.removeAttribute('src');
+        vid.src = '';
+        vid.style.display = 'none';
+      }
+      if (emptyBox) emptyBox.style.display = 'flex';
+      if ($('liveLabel')) $('liveLabel').textContent = activeDrone ? 'AWAITING FEED' : 'NO DRONE CONNECTED';
+      if ($('liveDot')) {
+        $('liveDot').style.background = 'var(--text-muted)';
+        $('liveDot').style.boxShadow = 'none';
+      }
+      return;
+    }
+
+    if (emptyBox) emptyBox.style.display = 'none';
+    if ($('liveLabel')) $('liveLabel').textContent = 'LIVE FEED';
+    if ($('liveDot')) {
+      $('liveDot').style.background = 'var(--success)';
+      $('liveDot').style.boxShadow = '';
+    }
+
+    const src = activeDrone.feed;
+    const isVideo = /\.(mp4|webm|ogg|m3u8)(\?|$)/i.test(src) || /^rtsp:/i.test(src);
+    if (isVideo && vid) {
+      if (im) im.style.display = 'none';
+      vid.style.display = 'block';
+      if (vid.getAttribute('src') !== src) {
+        vid.src = src;
+        vid.play().catch(() => {});
+      }
+    } else if (im) {
+      if (vid) vid.style.display = 'none';
+      im.style.display = 'block';
+      if (im.getAttribute('src') !== src) im.src = src;
+    }
+  }
   const ADDR={wifi:['IP address','192.168.1.50'],mavlink:['MAVLink endpoint','udp://0.0.0.0:14550'],rtsp:['Stream address','rtsp://192.168.1.50:554/live'],serial:['Serial port','/dev/ttyUSB0 or COM3']};
   const adOpen=()=>{['adName','adAddr','adStream'].forEach(i=>$(i).value='');$('adType').value='wifi';adType();$('adErr').textContent='';$('adGo').disabled=false;$('adGo').innerHTML='<i class="ti ti-plug"></i> Connect';$('adModal').classList.add('open');$('adName').focus()};
   const adClose=()=>$('adModal').classList.remove('open');
@@ -3356,7 +3315,7 @@ fetch(API_BASE + '/api/events').then(r => r.json()).then(events => {
       btn.disabled=false;btn.innerHTML='<i class="ti ti-plug"></i> Connect';
       if (res.success || res.drone) {
         D.push({
-          n, st: 'idle', ms: 'Ready for sortie', bat: 100, sig: 5, hrs: 0, maint: 'Nominal', feed: st || '/video_feed', conn: a
+          n, st: 'idle', ms: 'Ready for sortie', bat: 100, sig: 5, hrs: 0, maint: 'Nominal', feed: st || '', conn: a
         });
         cur=D.length-1;applyFeed();render();adClose();toast(n+' registered to fleet','ok','ti-circle-check');
       } else {
@@ -3385,20 +3344,27 @@ fetch(API_BASE + '/api/events').then(r => r.json()).then(events => {
               sig: dr.signal_strength || 5,
               hrs: dr.flight_hours || 0.0,
               maint: dr.maintenance_status || 'Nominal',
-              feed: dr.stream_url || '/video_feed',
+              feed: dr.stream_url || '',
               conn: dr.model || 'EcoWing Falcon Quad-RTK'
             });
           });
           if (cur >= D.length) cur = Math.max(0, D.length - 1);
           render();
+          applyFeed();
         }
       })
-      .catch(() => {});
+      .catch(() => {
+        render();
+        applyFeed();
+      });
   }
   window.loadDronesFromBackend = loadDronesFromBackend;
   loadDronesFromBackend();
+  applyFeed();
+
   // feed toolbar
   function snap(){
+    if (!d()) return toast('No drone connected to capture snapshot', 'warn', 'ti-plug-off');
     const f=$('fcFlash');f.classList.remove('go');void f.offsetWidth;f.classList.add('go');
     const im=$('liveFeedImg'), vid=$('liveFeedVideo');
     fetch(API_BASE + '/api/camera/command', {
@@ -3475,7 +3441,7 @@ fetch(API_BASE + '/api/events').then(r => r.json()).then(events => {
       toast(`Recording archived · ${pad(Math.floor(recS/60))}:${pad(recS%60)}`,'ok','ti-player-stop');
     });
   }
-  $('camRec').onclick=()=>rec?stopRec():startRec();
+  $('camRec').onclick=()=>{ if(!d()) return toast('No drone connected to record video','warn','ti-plug-off'); rec?stopRec():startRec(); };
   $('camZoom').onclick=e=>{const z=$('fcZoom'),o=z.classList.toggle('show');e.currentTarget.classList.toggle('on',o);if(!o){$('zoomRange').value=1;setZoom(1)}};
   function setZoom(v){
     const transform = v>1?`scale(${v})`:'';
@@ -3492,7 +3458,6 @@ fetch(API_BASE + '/api/events').then(r => r.json()).then(events => {
   $('zoomRange').oninput=e=>setZoom(+e.target.value);
   $('camTrack').onclick=e=>{
     track=!track;e.currentTarget.classList.toggle('on',track);
-    if($('hudTargets')) $('hudTargets').classList.toggle('hidden',!track);
     fetch(API_BASE + '/api/camera/command', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -3500,62 +3465,6 @@ fetch(API_BASE + '/api/events').then(r => r.json()).then(events => {
     }).catch(()=>{});
     toast(track?'Target auto-tracking enabled':'Target auto-tracking disabled','','ti-crosshair');
   };
-
-  // Camera Mode Switcher (4K Optical, FLIR Thermal IR, Night Vision, Webcam Capture)
-  let webcamStream = null;
-  const feedBox = $('liveFeedBox');
-  document.querySelectorAll('#camModePill .cm-btn[data-mode]').forEach(btn => {
-    btn.onclick = async () => {
-      document.querySelectorAll('#camModePill .cm-btn[data-mode]').forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
-      const mode = btn.dataset.mode;
-      const im = $('liveFeedImg');
-      const vid = $('liveFeedVideo');
-
-      feedBox.classList.remove('flir-mode', 'night-mode');
-
-      if (mode === 'rgb') {
-        if (webcamStream) { webcamStream.getTracks().forEach(t => t.stop()); webcamStream = null; }
-        vid.style.display = 'none';
-        im.style.display = 'block';
-        $('liveLabel').textContent = 'OPTICAL · 4K UHD';
-        toast('Optical 4K Natural Color Mode', 'ok', 'ti-eye');
-      } else if (mode === 'flir') {
-        feedBox.classList.add('flir-mode');
-        $('liveLabel').textContent = 'FLIR · THERMAL IR';
-        toast('FLIR Ironbow Thermal Infrared Active', 'warn', 'ti-flame');
-      } else if (mode === 'night') {
-        feedBox.classList.add('night-mode');
-        $('liveLabel').textContent = 'NIGHT VISION · LOW-LIGHT';
-        toast('Green Phosphor Night Vision Active', 'ok', 'ti-moon');
-      } else if (mode === 'webcam') {
-        try {
-          if (!webcamStream) {
-            webcamStream = await navigator.mediaDevices.getUserMedia({ video: { width: 1920, height: 1080 } });
-            vid.srcObject = webcamStream;
-            vid.play();
-          }
-          im.style.display = 'none';
-          vid.style.display = 'block';
-          $('liveLabel').textContent = 'CAPTURE CARD · LIVE';
-          toast('Live Camera / Capture Card Connected', 'ok', 'ti-video');
-        } catch (err) {
-          btn.classList.remove('active');
-          document.querySelector('#camModePill .cm-btn[data-mode="rgb"]').classList.add('active');
-          toast('Camera access not granted or unavailable', 'warn', 'ti-video-off');
-        }
-      }
-    };
-  });
-
-  const gridBtn = $('btnToggleGrid');
-  if (gridBtn) {
-    gridBtn.onclick = () => {
-      gridBtn.classList.toggle('active');
-      const g = $('fcGrid');
-      if (g) g.classList.toggle('show');
-    };
-  }
   document.addEventListener('keydown',e=>{
     if(e.key==='Escape')$('fcModal').classList.remove('open');
     if(!$('flight').classList.contains('active')||e.metaKey||e.ctrlKey||e.altKey)return;
@@ -3733,7 +3642,14 @@ fetch(API_BASE + '/api/events').then(r => r.json()).then(events => {
   const c=document.getElementById('hdrClock'),st=document.getElementById('hdrStatus'),t=document.getElementById('hdrStatusT'),l=document.getElementById('liveLabel');
   if(!c||!st||!l)return;
   const tick=()=>{c.textContent=new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'})};tick();setInterval(tick,1000);
-  const sync=()=>{const m={LIVE:['live','Feed live'],OFFLINE:['off','Feed offline']}[(l.textContent||'').trim()]||['wait','Connecting'];st.dataset.s=m[0];t.textContent=m[1]};
+  const sync=()=>{
+    const txt = (l.textContent||'').trim();
+    let m = ['wait','Connecting'];
+    if (txt.includes('4K') || txt.includes('OPTICAL') || txt.includes('LIVE')) m = ['live','Feed live'];
+    else if (txt.includes('STANDBY') || txt.includes('OFFLINE') || txt.includes('NO FEED')) m = ['off','No drone feed'];
+    st.dataset.s = m[0];
+    t.textContent = m[1];
+  };
   sync();new MutationObserver(sync).observe(l,{childList:true,characterData:true,subtree:true});
 })();
 </script>

@@ -36,7 +36,7 @@ const io = new Server(server, {
   }
 });
 app.set('socketio', io);
-app.set('activeDroneId', 'Drone-01');
+app.set('activeDroneId', null);
 
 // Middleware
 app.use(cors());

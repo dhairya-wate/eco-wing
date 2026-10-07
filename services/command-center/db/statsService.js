@@ -7,6 +7,7 @@
 const { isDbConnected } = require('../config/db');
 const Detection = require('../models/Detection');
 const Drone = require('../models/Drone');
+const memoryStore = require('./memoryStore');
 
 const CLASS_COLORS = {
   'Plastic Bottles': '#3b82f6',
@@ -125,7 +126,7 @@ class StatsService {
     }
   }
 
-  async getStatsPayload(activeDroneId = 'Drone-01') {
+  async getStatsPayload(activeDroneId = null) {
     const counts = await this.getClassCounts();
     const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]);
     const totalUnique = sorted.reduce((sum, item) => sum + item[1], 0);

@@ -61,6 +61,8 @@ router.post('/', async (req, res) => {
       memoryStore.saveDrone(createdDrone);
     }
 
+    req.app.set('activeDroneId', cleanId);
+
     const io = req.app.get('socketio');
     if (io) {
       try {
@@ -159,7 +161,15 @@ router.delete('/:id', async (req, res) => {
       memoryStore.deleteDrone(id);
     }
     if (req.app.get('activeDroneId') === id) {
-      req.app.set('activeDroneId', null);
+      let remainingId = null;
+      if (isDbConnected()) {
+        const remaining = await Drone.find().sort({ drone_id: 1 });
+        if (remaining.length > 0) remainingId = remaining[0].drone_id;
+      } else {
+        const remaining = memoryStore.getDrones();
+        if (remaining.length > 0) remainingId = remaining[0].drone_id;
+      }
+      req.app.set('activeDroneId', remainingId);
     }
     console.log(`[Fleet] Drone ${id} removed from fleet`);
 

@@ -52,21 +52,21 @@ router.get('/', async (req, res) => {
     const payload = {
       active_drone: drone?.drone_id || null,
       all_drones: allDrones,
-      telemetry: {
+      telemetry: drone ? {
         lat: t.lat || 40.7250,
         lng: t.lng || -73.9790,
         altitude_m: t.altitude_m || 85.0,
         speed_mps: t.speed_mps || 6.4,
         heading_deg: t.heading_deg || 142,
-        battery_pct: drone?.battery_pct || 78.4,
-        battery_voltage: drone?.battery_voltage || 24.8,
+        battery_pct: drone.battery_pct != null ? drone.battery_pct : 100,
+        battery_voltage: drone.battery_voltage || 24.8,
         satellites: t.satellites || 18,
         imu_temp_c: t.imu_temp_c || 34.5,
         wind_speed_mps: t.wind_speed_mps || 5.2,
         gimbal_pitch_deg: drone?.camera?.tilt_deg || -45,
-        flight_time_s: drone?.flight_time_s || 1420,
-        status: drone?.status === 'idle' ? 'Idle' : 'Active'
-      }
+        flight_time_s: drone?.flight_time_s || 0,
+        status: drone?.status === 'idle' ? 'Idle' : (drone?.status || 'Active')
+      } : null
     };
 
     res.json(payload);
