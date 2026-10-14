@@ -45,7 +45,7 @@ app.use(express.urlencoded({ extended: true }));
 
 // Auto-connect database for serverless environments (e.g. Vercel)
 app.use(async (req, res, next) => {
-  if (!isDbConnected()) {
+  if (process.env.VERCEL && !isDbConnected()) {
     try {
       await connectDB();
     } catch (err) {}
@@ -110,13 +110,19 @@ app.use('/api/footage', footageRoutes);
 app.use('/api', detectionRoutes); // /api/events, /api/detections, /api/feed/clear, /api/stats, /api/chart_data
 app.use('/', videoFeedRoutes);     // /video_feed, /video_feed/snapshot
 
-// Serve static frontend files
-app.use(express.static(path.join(__dirname)));
+// Product Landing Page route
+app.get('/landing', (req, res) => {
+  res.sendFile(path.join(__dirname, 'landing.html'));
+});
 
-// Route for root
-app.get('/', (req, res) => {
+// Autonomous Drone Command Center App routes
+app.get(['/', '/app', '/dashboard', '/command', '/control'], (req, res) => {
   res.sendFile(path.join(__dirname, 'index.html'));
 });
+
+// Serve static frontend files (without default index.html interception)
+app.use(express.static(path.join(__dirname), { index: false }));
+app.use(express.static(path.join(__dirname, 'public'), { index: false }));
 
 // Socket.io Events
 io.on('connection', async (socket) => {

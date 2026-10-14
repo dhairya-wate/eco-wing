@@ -21,9 +21,12 @@ router.post('/command', async (req, res) => {
     const { command, zoom, tilt, drone_id } = req.body;
     const targetDroneId = drone_id || req.app.get('activeDroneId') || 'Drone-01';
 
-    if (command === 'snap') {
+    if (command === 'snap' || command === 'photo') {
       cameraState.last_snap = new Date().toISOString();
       console.log(`[Camera] Snapshot taken on ${targetDroneId}`);
+    } else if (command === 'record') {
+      cameraState.recording = req.body.value !== undefined ? !!req.body.value : !cameraState.recording;
+      console.log(`[Camera] Video recording set to ${cameraState.recording} on ${targetDroneId}`);
     } else if (command === 'start_rec' || command === 'startRec') {
       cameraState.recording = true;
       console.log(`[Camera] Video recording started on ${targetDroneId}`);

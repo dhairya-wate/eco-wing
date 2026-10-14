@@ -3,8 +3,42 @@ const router = express.Router();
 const Footage = require('../models/Footage');
 const { isDbConnected } = require('../config/db');
 
-// In-memory fallback
-let memoryFootage = [];
+// In-memory fallback with realistic aerial survey records
+let memoryFootage = [
+  {
+    flight_id: 'FLT-101',
+    site: 'East River Marine Debris Patrol',
+    flight_date: new Date(Date.now() - 3600000 * 2).toISOString(),
+    duration_minutes: 24,
+    images_count: 86,
+    detections_count: 22,
+    mode: 'Optical 4K UHD',
+    thumbnail: '/video_feed',
+    status: 'Processed'
+  },
+  {
+    flight_id: 'FLT-102',
+    site: 'Harbor Inlet Survey',
+    flight_date: new Date(Date.now() - 3600000 * 26).toISOString(),
+    duration_minutes: 32,
+    images_count: 142,
+    detections_count: 38,
+    mode: 'Optical 4K / Thermal',
+    thumbnail: '/video_feed',
+    status: 'Processed'
+  },
+  {
+    flight_id: 'FLT-103',
+    site: 'Hudson Bay Estuary Scan',
+    flight_date: new Date(Date.now() - 3600000 * 50).toISOString(),
+    duration_minutes: 18,
+    images_count: 64,
+    detections_count: 15,
+    mode: 'Thermal FLIR Boson',
+    thumbnail: '/video_feed',
+    status: 'Processed'
+  }
+];
 
 /**
  * @route   GET /api/footage

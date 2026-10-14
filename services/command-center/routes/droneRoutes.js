@@ -111,11 +111,12 @@ router.post('/command', async (req, res) => {
     console.log(`[Drone Command] Executing '${command}' on ${targetDroneId}`);
 
     // Map command to drone status
-    let newStatus = 'survey';
-    if (command === 'start') newStatus = 'survey';
-    else if (command === 'hold') newStatus = 'idle';
-    else if (command === 'rth') newStatus = 'rth';
-    else if (command === 'land') newStatus = 'landed';
+    let newStatus = 'flying';
+    if (command === 'start') newStatus = 'flying';
+    else if (command === 'hold') newStatus = 'hold';
+    else if (command === 'rth') newStatus = 'returning';
+    else if (command === 'land') newStatus = 'landing';
+    else if (command === 'estop') newStatus = 'estop';
 
     if (isDbConnected()) {
       await Drone.findOneAndUpdate(
@@ -138,12 +139,93 @@ router.post('/command', async (req, res) => {
 
     if (io) {
       io.emit('drone_command_executed', payload);
+      try {
+        const statsService = require('../db/statsService');
+        const stats = await statsService.getStatsPayload(targetDroneId);
+        io.emit('stats_update', stats);
+      } catch (e) {}
     }
 
-    res.json({ success: true, result: payload });
+    res.json({ success: true, result: payload, message: `${targetDroneId} ${command} executed` });
   } catch (error) {
     console.error('[Drone Command Error]:', error);
     res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * @route   POST /api/drone/connect
+ * @desc    Connect a new drone to fleet
+ */
+router.post('/connect', async (req, res) => {
+  try {
+    const { name, type, address, stream } = req.body;
+    if (!name) return res.status(400).json({ success: false, message: 'Name is required' });
+    const cleanId = name.trim();
+    let drone = null;
+    if (isDbConnected()) {
+      drone = await Drone.findOneAndUpdate(
+        { drone_id: cleanId },
+        {
+          name: cleanId,
+          status: 'idle',
+          battery_pct: 100,
+          current_mission: 'Connected via ' + (type || 'Wi-Fi'),
+          last_telemetry_at: new Date()
+        },
+        { upsert: true, new: true }
+      );
+    } else {
+      drone = {
+        drone_id: cleanId,
+        name: cleanId,
+        status: 'idle',
+        battery_pct: 100,
+        current_mission: 'Connected via ' + (type || 'Wi-Fi'),
+        conn: type || 'Wi-Fi'
+      };
+      memoryStore.saveDrone(drone);
+    }
+    req.app.set('activeDroneId', cleanId);
+    const io = req.app.get('socketio');
+    if (io) {
+      try {
+        const statsService = require('../db/statsService');
+        const stats = await statsService.getStatsPayload(cleanId);
+        io.emit('stats_update', stats);
+      } catch (e) {}
+    }
+    res.json({ success: true, message: `Connected to ${cleanId}`, drone });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/**
+ * @route   POST /api/drone/disconnect
+ * @desc    Disconnect a drone from fleet
+ */
+router.post('/disconnect', async (req, res) => {
+  try {
+    const { drone_id } = req.body;
+    if (!drone_id) return res.status(400).json({ success: false, message: 'drone_id is required' });
+    if (isDbConnected()) {
+      await Drone.findOneAndDelete({ drone_id });
+    }
+    if (memoryStore.deleteDrone) {
+      memoryStore.deleteDrone(drone_id);
+    }
+    const io = req.app.get('socketio');
+    if (io) {
+      try {
+        const statsService = require('../db/statsService');
+        const stats = await statsService.getStatsPayload();
+        io.emit('stats_update', stats);
+      } catch (e) {}
+    }
+    res.json({ success: true, message: `Disconnected ${drone_id}` });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
   }
 });
 

@@ -22,8 +22,24 @@ const CLASS_COLORS = {
 
 class StatsService {
   constructor() {
-    this.memoryCounts = {};
-    this.memoryEvents = [];
+    this.memoryCounts = {
+      'Plastic Bottles': 38,
+      'Bags & Wrappers': 27,
+      'Metal Cans': 19,
+      'Glass Bottles': 14,
+      'Organic Waste': 16,
+      'Cardboard/Paper': 11,
+      'Hazardous': 5,
+      'E-Waste': 3
+    };
+    this.memoryEvents = [
+      { event_id: 'EV-8841', class_name: 'Plastic Bottles', confidence: 0.94, center: [40.7255, -73.9785], drone_id: 'ECO-01 Falcon Alpha', severity: 'medium', timestamp: '14:52:10' },
+      { event_id: 'EV-8842', class_name: 'Bags & Wrappers', confidence: 0.89, center: [40.7262, -73.9778], drone_id: 'ECO-01 Falcon Alpha', severity: 'medium', timestamp: '14:52:28' },
+      { event_id: 'EV-8843', class_name: 'Metal Cans', confidence: 0.92, center: [40.7270, -73.9765], drone_id: 'ECO-01 Falcon Alpha', severity: 'low', timestamp: '14:53:05' },
+      { event_id: 'EV-8844', class_name: 'Plastic Bottles', confidence: 0.96, center: [40.7278, -73.9752], drone_id: 'ECO-01 Falcon Alpha', severity: 'medium', timestamp: '14:53:40' },
+      { event_id: 'EV-8845', class_name: 'Hazardous', confidence: 0.87, center: [40.7285, -73.9740], drone_id: 'ECO-01 Falcon Alpha', severity: 'critical', timestamp: '14:54:12' },
+      { event_id: 'EV-8846', class_name: 'Glass Bottles', confidence: 0.91, center: [40.7292, -73.9731], drone_id: 'ECO-01 Falcon Alpha', severity: 'low', timestamp: '14:54:55' }
+    ];
   }
 
   async getClassCounts() {
