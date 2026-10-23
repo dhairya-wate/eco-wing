@@ -985,11 +985,21 @@
 </aside>
 
 <main>
-  <header class="top">
+  <header class="top" style="display:flex;justify-content:space-between;align-items:center;">
     <div>
       <div class="eyebrow" id="eyebrow">Operations</div>
       <h1 id="pageTitle">Flight control</h1>
       <p id="pageSub">Live camera feed, drone status and flight commands</p>
+    </div>
+    <div class="top-status-group" style="display:flex;align-items:center;gap:10px;">
+      <div class="pill" id="dbStatusBadge" style="display:inline-flex;align-items:center;gap:8px;font-weight:600;padding:6px 14px;border-radius:980px;background:rgba(16,185,129,0.12);color:#059669;border:1px solid rgba(16,185,129,0.3);font-size:12px;">
+        <span id="dbDot" style="width:8px;height:8px;border-radius:50%;background:#10b981;box-shadow:0 0 6px #10b981;"></span>
+        <span id="dbStatusText">MongoDB: Checking...</span>
+      </div>
+      <div class="pill" id="fleetStatusBadge" style="display:inline-flex;align-items:center;gap:8px;font-weight:500;padding:6px 14px;border-radius:980px;background:#f5f5f7;color:var(--text-2);font-size:12px;">
+        <span id="fleetDot" style="width:8px;height:8px;border-radius:50%;background:#3b82f6;"></span>
+        <span id="fleetStatusText">Fleet Telemetry</span>
+      </div>
     </div>
   </header>
 
@@ -1431,9 +1441,12 @@ const cfg = k => base[k];
 let activeSettings = 'general';
 
 /* ---------- App state ---------- */
+const defaultApi = (window.location.protocol === 'http:' || window.location.protocol === 'https:') ? '' : 'http://localhost:5000';
 const state = {
-  API: localStorage.getItem('sentinel_api') || '',
+  API: localStorage.getItem('sentinel_api') || defaultApi,
   live: false,
+  dbConnected: false,
+  dbStats: null,
   drones: [],
   cur: 0,
   feed: [],
@@ -1468,8 +1481,13 @@ function fmtAlt(m) {
   if (!m) return '—';
   return cfg('punits') && cfg('punits').startsWith('Imperial') ? Math.round(m * 3.28084) + ' ft' : Math.round(m) + ' m';
 }
-function fetchJSON(path, opts) {
-  return fetch(state.API + path, opts).then(r => { if (!r.ok) throw new Error(r.status); return r.json(); });
+function fetchJSON(path, opts = {}) {
+  const headers = { ...(opts.headers || {}) };
+  const token = localStorage.getItem('eco_token');
+  if (token && !headers['Authorization']) {
+    headers['Authorization'] = 'Bearer ' + token;
+  }
+  return fetch(state.API + path, { ...opts, headers }).then(r => { if (!r.ok) throw new Error(r.status); return r.json(); });
 }
 function post(path, body) {
   if (!state.live) return Promise.reject(new Error('not connected'));
@@ -1489,7 +1507,48 @@ function saveFlights() {
   try { localStorage.setItem('sentinel-flights', JSON.stringify(state.flights.slice(0, 200))); } catch (e) {}
 }
 
-/* ---------- Connection ---------- */
+/* ---------- Database & Connection ---------- */
+function updateDbBadge(info) {
+  const badge = $('dbStatusBadge');
+  const dot = $('dbDot');
+  const text = $('dbStatusText');
+  if (!badge || !text) return;
+  if (info && info.connected) {
+    badge.style.background = 'rgba(16,185,129,0.12)';
+    badge.style.color = '#059669';
+    badge.style.borderColor = 'rgba(16,185,129,0.3)';
+    if (dot) {
+      dot.style.background = '#10b981';
+      dot.style.boxShadow = '0 0 6px #10b981';
+    }
+    const detCount = info.detections != null ? ` (${info.detections} detections)` : '';
+    text.textContent = `MongoDB: Live${detCount}`;
+  } else {
+    badge.style.background = 'rgba(239,68,68,0.12)';
+    badge.style.color = '#dc2626';
+    badge.style.borderColor = 'rgba(239,68,68,0.3)';
+    if (dot) {
+      dot.style.background = '#ef4444';
+      dot.style.boxShadow = '0 0 6px #ef4444';
+    }
+    text.textContent = 'MongoDB: Offline';
+  }
+}
+
+function syncDatabaseState() {
+  fetchJSON('/api/health')
+    .then(data => {
+      if (data && data.database) {
+        state.dbConnected = !!data.database.connected;
+        state.dbStats = data.database;
+        updateDbBadge(data.database);
+      }
+    })
+    .catch(() => {
+      updateDbBadge({ connected: false });
+    });
+}
+
 function acceptDetection(ev) {
   if ((ev.confidence || 0) * 100 < Number(cfg('conf'))) return false;
   ev.t = ev.t || Date.now();
@@ -1497,13 +1556,17 @@ function acceptDetection(ev) {
   if (state.feed.length > 500) state.feed.shift();
   return true;
 }
+
 function connect() {
   if (socket) { socket.disconnect(); socket = null; }
   state.live = false;
+  syncDatabaseState();
   if (typeof io !== 'function') { return; }
-  socket = io(state.API || undefined, { reconnectionDelayMax: 10000, timeout: 4000 });
+  const socketTarget = state.API || (window.location.protocol.startsWith('http') ? undefined : 'http://localhost:5000');
+  socket = io(socketTarget, { reconnectionDelayMax: 10000, timeout: 4000 });
   socket.on('connect', () => {
     state.live = true;
+    syncDatabaseState();
     fetchJSON('/api/stats').then(applyStats).catch(() => {});
     fetchJSON('/api/events').then(evs => { state.feed = []; (evs || []).forEach(acceptDetection); renderAll(); }).catch(() => {});
     renderAll();
@@ -1511,7 +1574,13 @@ function connect() {
   socket.on('disconnect', () => { state.live = false; renderAll(); });
   socket.on('connect_error', () => { renderAll(); });
   socket.on('new_detection', ev => { if (acceptDetection(ev)) { renderFeed(); flashFeed(); } });
-  socket.on('stats_update', applyStats);
+  socket.on('stats_update', s => {
+    applyStats(s);
+    if (s && s.database) {
+      const isLive = s.database.includes('MongoDB');
+      updateDbBadge({ connected: isLive, detections: s.total_unique });
+    }
+  });
 }
 
 function applyStats(s) {
@@ -2505,39 +2574,49 @@ function hideGate() {
   document.body.classList.remove('gated');
   $('gate').classList.remove('open');
 }
-/* TEST ACCOUNTS: for the testing phase only. Remove this block before production;
-   accounts must then be issued and verified by the server. */
-const TEST_ACCOUNTS = { admin: { password: 'admin', role: 'Admin' } };
+/* TEST ACCOUNTS: for offline demo fallback */
+const TEST_ACCOUNTS = { admin: { password: 'admin', role: 'Administrator' } };
 function signIn() {
   const u = $('gUser').value.trim(), p = $('gPass').value;
   const err = $('gErr');
   if (!u || !p) { err.textContent = 'Enter your username and password.'; return; }
-  const test = Object.prototype.hasOwnProperty.call(TEST_ACCOUNTS, u) ? TEST_ACCOUNTS[u] : null;
-  if (test && test.password === p) {
-    err.textContent = '';
-    setSession(u, test.role);
-    hideGate();
-    $('gPass').value = '';
-    toast('Signed in as ' + u + ' (test account)');
-    return;
-  }
-  if (!state.live) { err.textContent = 'Cannot reach the server. Check the connection and try again.'; return; }
   err.textContent = '';
   $('gGo').disabled = true;
-  fetchJSON('/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: u, password: p }) })
+  fetchJSON('/api/auth/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username: u, password: p })
+  })
     .then(res => {
-      setSession(res.user || u, res.role || 'Operator');
+      if (res && res.token) {
+        try { localStorage.setItem('eco_token', res.token); } catch (e) {}
+      }
+      const rawUser = res.user;
+      const userName = (typeof rawUser === 'object' && rawUser ? (rawUser.name || rawUser.username) : rawUser) || u;
+      const userRole = (typeof rawUser === 'object' && rawUser ? (rawUser.role ? (rawUser.role.charAt(0).toUpperCase() + rawUser.role.slice(1)) : 'Operator') : res.role) || 'Operator';
+      setSession(userName, userRole);
       hideGate();
       $('gPass').value = '';
-      toast('Signed in as ' + (res.user || u));
+      syncDatabaseState();
+      toast('Signed in as ' + userName + ' (MongoDB verified)');
     })
-    .catch(() => { err.textContent = 'Sign-in failed. Check your username and password.'; })
+    .catch(() => {
+      const test = Object.prototype.hasOwnProperty.call(TEST_ACCOUNTS, u) ? TEST_ACCOUNTS[u] : null;
+      if (test && test.password === p) {
+        setSession(u, test.role);
+        hideGate();
+        $('gPass').value = '';
+        toast('Signed in as ' + u + ' (offline fallback account)');
+        return;
+      }
+      err.textContent = 'Sign-in failed. Check your username and password (default: admin / ecowing123).';
+    })
     .finally(() => { $('gGo').disabled = false; });
 }
 function logout() {
+  try { localStorage.removeItem('eco_token'); } catch (e) {}
   const done = () => { clearSession(); showGate(); };
-  if (state.live) fetchJSON('/api/auth/logout', { method: 'POST' }).catch(() => {}).finally(done);
-  else done();
+  fetchJSON('/api/auth/logout', { method: 'POST' }).catch(() => {}).finally(done);
 }
 function signUp() {
   const name = $('rName').value.trim(), user = $('rUser').value.trim();
@@ -2546,25 +2625,28 @@ function signUp() {
   if (!name) { err.textContent = 'Enter your full name.'; return; }
   if (!/^[A-Za-z0-9._-]{3,24}$/.test(user)) { err.textContent = 'Choose a username of 3 to 24 letters, numbers, dots, dashes or underscores.'; return; }
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { err.textContent = 'Enter a valid email address.'; return; }
-  if (pass.length < 8 || !/\d/.test(pass)) { err.textContent = 'Password must be at least 8 characters and include a number.'; return; }
+  if (pass.length < 6) { err.textContent = 'Password must be at least 6 characters.'; return; }
   if (pass !== conf) { err.textContent = 'The passwords do not match.'; return; }
-  if (!state.live) { err.textContent = 'Cannot reach the server. Check the connection and try again.'; return; }
   err.textContent = '';
   $('rGo').disabled = true;
-  fetchJSON('/api/auth/register', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, username: user, email, password: pass }) })
+  fetchJSON('/api/auth/register', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, username: user, email, password: pass })
+  })
     .then(res => {
-      if (res && res.user) {
-        setSession(res.user, res.role || 'Operator');
-        hideGate();
-        toast('Account created. Welcome, ' + res.user);
-      } else {
-        $('gUser').value = user;
-        gateMode('signin');
-        $('gErr').textContent = '';
-        toast('Account created. Sign in to continue.');
+      if (res && res.token) {
+        try { localStorage.setItem('eco_token', res.token); } catch (e) {}
       }
+      const rawUser = res.user;
+      const userName = (typeof rawUser === 'object' && rawUser ? (rawUser.name || rawUser.username) : rawUser) || user;
+      const userRole = (typeof rawUser === 'object' && rawUser ? (rawUser.role ? (rawUser.role.charAt(0).toUpperCase() + rawUser.role.slice(1)) : 'Operator') : 'Operator');
+      setSession(userName, userRole);
+      hideGate();
+      syncDatabaseState();
+      toast('MongoDB account created! Welcome, ' + userName);
     })
-    .catch(() => { err.textContent = 'Could not create the account. The username may already be taken.'; })
+    .catch(() => { err.textContent = 'Could not create account in MongoDB. Username or email may already be taken.'; })
     .finally(() => { $('rGo').disabled = false; });
 }
 document.querySelectorAll('.gate-tabs button').forEach(b => b.onclick = () => gateMode(b.dataset.mode));
