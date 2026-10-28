@@ -1,19 +1,13 @@
 const http = require('http');
-const express = require('express');
 const { Server } = require('socket.io');
 const mongoose = require('mongoose');
-const cors = require('cors');
-require('dotenv').config();
-
-const { router: apiRouter } = require('./routes/api');
-const droneRouter = require('./routes/drone');
-const { handleClient, broadcastFrame } = require('./videoStream');
+const app = require('./app');
 const Drone = require('./models/Drone');
 const Telemetry = require('./models/Telemetry');
 const Detection = require('./models/Detection');
+const { broadcastFrame } = require('./videoStream');
 const { computeDashboardStats } = require('./routes/api');
 
-const app = express();
 const server = http.createServer(app);
 
 // Configure Socket.IO with CORS
@@ -27,45 +21,6 @@ const io = new Server(server, {
 
 // Attach io to express app so routes can broadcast events
 app.set('io', io);
-
-// Middlewares
-app.use(cors());
-
-// Raw binary body parser for raw JPEG stream frames
-app.use(express.raw({
-  type: ['image/jpeg', 'image/png', 'application/octet-stream'],
-  limit: '20mb'
-}));
-
-// Standard JSON body parser
-app.use(express.json({ limit: '20mb' }));
-app.use(express.urlencoded({ extended: true, limit: '20mb' }));
-
-// Health check endpoint
-app.get('/health', (req, res) => {
-  const isMongoConnected = mongoose.connection.readyState === 1;
-  res.json({
-    status: 'ok',
-    service: 'ecowing-backend',
-    mongodb: isMongoConnected ? 'connected' : 'disconnected',
-    timestamp: new Date()
-  });
-});
-
-// Camera video feed endpoint (MJPEG streaming)
-app.get('/video_feed', handleClient);
-
-// Mount API routes
-app.use('/api/drone', droneRouter);
-app.use('/api', apiRouter);
-
-// Serve static frontend files (index.html, config.js, etc.)
-const path = require('path');
-app.use(express.static(path.join(__dirname, '..')));
-
-app.get('/', (req, res) => {
-  res.sendFile(path.join(__dirname, '..', 'index.html'));
-});
 
 // Socket.IO event handling
 let nextSocketEventId = 1;
@@ -219,31 +174,10 @@ setInterval(async () => {
   }
 }, 4000);
 
-// MongoDB Connection with auto-reconnect (supports local MongoDB & MongoDB Atlas)
-const MONGO_URI = process.env.MONGO_URI || process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/ecowing';
-const safeLogUri = MONGO_URI.replace(/:([^:@]+)@/, ':****@');
-
-async function connectMongo() {
-  console.log(`[MongoDB] Connecting to ${safeLogUri}...`);
-  try {
-    await mongoose.connect(MONGO_URI, {
-      serverSelectionTimeoutMS: 10000
-    });
-    console.log('[MongoDB] Connected successfully to database');
-  } catch (err) {
-    console.warn(`[MongoDB] Connection error: ${err.message}. Retrying in 5 seconds...`);
-    setTimeout(connectMongo, 5000);
-  }
-}
-
-connectMongo();
-
-mongoose.connection.on('disconnected', () => {
-  console.warn('[MongoDB] Disconnected from MongoDB. Reconnecting...');
-});
-
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, '0.0.0.0', () => {
+  const MONGO_URI = process.env.MONGO_URI || process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/ecowing';
+  const safeLogUri = MONGO_URI.replace(/:([^:@]+)@/, ':****@');
   console.log(`====================================================`);
   console.log(` EcoWing Drone Fleet Command Center Backend Running`);
   console.log(` Port: ${PORT}`);
@@ -252,4 +186,3 @@ server.listen(PORT, '0.0.0.0', () => {
   console.log(` MongoDB: ${safeLogUri}`);
   console.log(`====================================================`);
 });
-
