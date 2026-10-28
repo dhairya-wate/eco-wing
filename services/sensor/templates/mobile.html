@@ -340,9 +340,14 @@
       <div class="brand-title">
         EcoWing <span>Mobile</span>
       </div>
-      <div class="status-pill" id="status-pill">
-        <span class="status-dot"></span>
-        <span id="status-text">CONNECTING...</span>
+      <div style="display: flex; gap: 8px; align-items: center;">
+        <button id="btn-config-server" style="background: rgba(255,255,255,0.15); border: 1px solid rgba(255,255,255,0.3); color: #fff; border-radius: 12px; padding: 4px 10px; font-size: 11px; cursor: pointer;">
+          ⚙️ Server
+        </button>
+        <div class="status-pill" id="status-pill">
+          <span class="status-dot"></span>
+          <span id="status-text">CONNECTING...</span>
+        </div>
       </div>
     </div>
 
@@ -523,9 +528,27 @@
       }
     }
 
+    // Server Configuration
+    const btnConfigServer = document.getElementById('btn-config-server');
+    let customServer = localStorage.getItem('ecowing_server_url') || '';
+
+    btnConfigServer.addEventListener('click', () => {
+      const entered = prompt('Enter your AI Server IP or Tunnel URL (e.g. 192.168.31.44:5000 or your-tunnel.loca.lt):', customServer || window.location.host);
+      if (entered) {
+        customServer = entered.trim().replace(/^https?:\/\//, '').replace(/\/$/, '');
+        localStorage.setItem('ecowing_server_url', customServer);
+        if (ws) ws.close();
+        initWebSocket();
+      }
+    });
+
     function initWebSocket() {
-      const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const wsUrl = `${proto}//${window.location.host}/ws/mobile_stream`;
+      const targetHost = customServer || window.location.host;
+      const isHttps = window.location.protocol === 'https:' || targetHost.includes('loca.lt') || targetHost.includes('ngrok') || targetHost.includes('trycloudflare');
+      const proto = isHttps ? 'wss:' : 'ws:';
+      const wsUrl = `${proto}//${targetHost}/ws/mobile_stream`;
+      
+      console.log('Connecting to WebSocket:', wsUrl);
       ws = new WebSocket(wsUrl);
 
       ws.onopen = () => {
