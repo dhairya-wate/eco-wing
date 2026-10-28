@@ -27,14 +27,29 @@
       </div>
 
       <div class="header-badges">
-        <div class="badge status-live">
-          <span class="pulse-dot"></span> LIVE STREAMING
+        <div class="badge status-live" id="stream-status-badge">
+          <span class="pulse-dot"></span> <span id="stream-status-text">CONNECTING...</span>
         </div>
-        <div class="badge ip-badge" id="host-ip-badge">
-          IP: Detecting...
-        </div>
+        <button class="badge ip-badge" id="host-ip-badge" style="cursor: pointer;" title="Click to change backend server">
+          ⚙️ Set Backend
+        </button>
       </div>
     </header>
+
+    <!-- Backend Connection Bar for Vercel / Remote Hosting -->
+    <div class="backend-banner" id="backend-banner" style="background: var(--bg-card); border: 1px solid var(--border-color); border-radius: var(--radius-lg); padding: 12px 20px; display: flex; justify-content: space-between; align-items: center; gap: 14px; flex-wrap: wrap;">
+      <div style="display: flex; align-items: center; gap: 10px;">
+        <span style="font-size: 18px;">🔌</span>
+        <div>
+          <div style="font-size: 13px; font-weight: 700;" id="banner-status-title">Stream Source Connection</div>
+          <div style="font-size: 11px; color: var(--text-muted);" id="banner-status-sub">Connecting to local or tunnel backend...</div>
+        </div>
+      </div>
+      <div style="display: flex; gap: 8px; flex: 1; max-width: 580px; min-width: 280px;">
+        <input type="text" id="input-backend-url" placeholder="e.g. https://your-tunnel.loca.lt or http://localhost:5000" style="padding: 7px 12px; font-size: 12px; font-family: monospace;" />
+        <button class="btn btn-primary btn-sm" id="btn-connect-backend" style="white-space: nowrap;">Connect Stream</button>
+      </div>
+    </div>
 
     <!-- Metrics Row -->
     <section class="metrics-grid">

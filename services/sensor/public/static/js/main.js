@@ -1,9 +1,30 @@
 document.addEventListener("DOMContentLoaded", () => {
   let hasOverlay = true;
   let systemInfo = null;
+  let ws = null;
+  let pollInterval = null;
+
+  // Backend URL handling (supports local, LAN IP, and public tunnels on Vercel)
+  const isVercel = window.location.hostname.includes("vercel.app");
+  let backendUrl = localStorage.getItem("ecowing_backend_url") || "";
+  
+  if (!backendUrl) {
+    if (!isVercel) {
+      backendUrl = window.location.origin;
+    } else {
+      backendUrl = ""; // Needs user to connect tunnel
+    }
+  }
 
   // DOM Elements
   const hostIpBadge = document.getElementById("host-ip-badge");
+  const streamStatusBadge = document.getElementById("stream-status-badge");
+  const streamStatusText = document.getElementById("stream-status-text");
+  const bannerStatusTitle = document.getElementById("banner-status-title");
+  const bannerStatusSub = document.getElementById("banner-status-sub");
+  const inputBackendUrl = document.getElementById("input-backend-url");
+  const btnConnectBackend = document.getElementById("btn-connect-backend");
+
   const streamImg = document.getElementById("stream-img");
   const valTotal = document.getElementById("val-total");
   const valRec = document.getElementById("val-rec");
@@ -38,19 +59,68 @@ document.addEventListener("DOMContentLoaded", () => {
   const fileInput = document.getElementById("file-input");
   const uploadResult = document.getElementById("upload-result");
 
+  if (inputBackendUrl) {
+    inputBackendUrl.value = backendUrl;
+  }
+
+  // Connect Backend Logic
+  function setBackend(url) {
+    if (!url) return;
+    url = url.trim().replace(/\/$/, "");
+
+    // Check mixed content security
+    if (window.location.protocol === "https:" && url.startsWith("http://")) {
+      alert("⚠️ Mixed Content Warning:\n\nBecause this page is on HTTPS (Vercel), web browsers block unencrypted 'http://' streams.\n\nPlease either:\n1. Use a secure HTTPS tunnel (e.g. double-click 'start_tunnel.bat' to get https://...loca.lt)\n2. OR open the local dashboard directly at http://localhost:5000");
+    }
+
+    backendUrl = url;
+    localStorage.setItem("ecowing_backend_url", backendUrl);
+    if (inputBackendUrl) inputBackendUrl.value = backendUrl;
+
+    bannerStatusTitle.textContent = "Connecting to " + backendUrl;
+    bannerStatusSub.textContent = "Loading stream and telemetry...";
+
+    // Reload stream image
+    streamImg.src = `${backendUrl}/video_feed?overlay=${hasOverlay}&t=${Date.now()}`;
+    
+    loadSystemInfo();
+    initWebSocket();
+  }
+
+  btnConnectBackend.addEventListener("click", () => {
+    const val = inputBackendUrl.value.trim();
+    if (!val) {
+      alert("Please enter a valid backend stream URL (e.g. https://your-tunnel.loca.lt or http://localhost:5000)");
+      return;
+    }
+    setBackend(val);
+  });
+
+  hostIpBadge.addEventListener("click", () => {
+    const val = prompt("Enter your AI Detection Server or Tunnel URL:", backendUrl || "https://your-tunnel.loca.lt");
+    if (val) setBackend(val);
+  });
+
   // Load System Info
   async function loadSystemInfo() {
+    const targetUrl = backendUrl ? `${backendUrl}/api/system_info` : "/api/system_info";
     try {
-      const res = await fetch("/api/system_info");
+      const res = await fetch(targetUrl);
+      if (!res.ok) throw new Error("Backend offline");
       systemInfo = await res.json();
       
       const ip = systemInfo.local_ip || window.location.hostname;
       const port = systemInfo.port || window.location.port || "5000";
-      const streamUrl = `http://${ip}:${port}/video_feed`;
-      const apiUrl = `http://${ip}:${port}/api/detections`;
-      const mobileUrl = `http://${ip}:${port}/mobile`;
+      const base = backendUrl || `http://${ip}:${port}`;
+      const streamUrl = `${base}/video_feed`;
+      const apiUrl = `${base}/api/detections`;
+      const mobileUrl = `${base}/mobile`;
 
-      hostIpBadge.textContent = `IP: ${ip}:${port}`;
+      hostIpBadge.textContent = `Backend: ${base.replace(/^https?:\/\//, '')}`;
+      bannerStatusTitle.textContent = "Stream Connected: " + base;
+      bannerStatusSub.textContent = "AI Waste Classification Active";
+      streamStatusText.textContent = "LIVE STREAMING";
+
       inputStreamUrl.value = streamUrl;
       inputApiUrl.value = apiUrl;
       if (inputMobileUrl) {
@@ -77,7 +147,15 @@ document.addEventListener("DOMContentLoaded", () => {
         confVal.textContent = `${pct}%`;
       }
     } catch (err) {
-      console.error("Failed to load system info:", err);
+      if (isVercel && !backendUrl) {
+        bannerStatusTitle.textContent = "Backend Stream Disconnected";
+        bannerStatusSub.textContent = "Paste your tunnel link (https://...loca.lt) above to start stream on Vercel";
+        streamStatusText.textContent = "STREAM OFFLINE";
+      } else {
+        bannerStatusTitle.textContent = "Backend Connection Failed";
+        bannerStatusSub.textContent = "Ensure 'python run.py' or tunnel is running on your machine";
+        streamStatusText.textContent = "OFFLINE";
+      }
     }
   }
 
@@ -101,7 +179,6 @@ document.addEventListener("DOMContentLoaded", () => {
     subRec.textContent = `${pct}% of detected`;
     livePillCount.textContent = `${total} Detected`;
 
-    // Render detected items list
     if (data.items && data.items.length > 0) {
       let html = "";
       data.items.forEach(item => {
@@ -137,38 +214,54 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // WebSocket Connection
   function initWebSocket() {
-    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const wsUrl = `${protocol}//${window.location.host}/ws`;
-    const ws = new WebSocket(wsUrl);
+    if (ws) {
+      try { ws.close(); } catch(e) {}
+      ws = null;
+    }
 
-    ws.onmessage = (event) => {
-      try {
-        const payload = JSON.parse(event.data);
-        if (payload.type === "telemetry") {
-          updateTelemetry(payload.summary);
-        }
-      } catch (e) {
-        console.error("WS Parse error:", e);
-      }
-    };
+    const target = backendUrl || window.location.origin;
+    const cleanHost = target.replace(/^https?:\/\//, '');
+    const isHttps = target.startsWith("https:") || window.location.protocol === "https:";
+    const proto = isHttps ? "wss:" : "ws:";
+    const wsUrl = `${proto}//${cleanHost}/ws`;
 
-    ws.onerror = () => {
-      // Fallback to HTTP polling
+    try {
+      ws = new WebSocket(wsUrl);
+      ws.onopen = () => {
+        streamStatusText.textContent = "LIVE STREAMING";
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const payload = JSON.parse(event.data);
+          if (payload.type === "telemetry") {
+            updateTelemetry(payload.summary);
+          }
+        } catch (e) {}
+      };
+
+      ws.onerror = () => {
+        startPolling();
+      };
+
+      ws.onclose = () => {
+        startPolling();
+      };
+    } catch (e) {
       startPolling();
-    };
-
-    ws.onclose = () => {
-      setTimeout(initWebSocket, 3000);
-    };
+    }
   }
 
   function startPolling() {
-    setInterval(async () => {
+    if (pollInterval) clearInterval(pollInterval);
+    pollInterval = setInterval(async () => {
+      const target = backendUrl ? `${backendUrl}/api/detections` : "/api/detections";
       try {
-        const res = await fetch("/api/detections");
+        const res = await fetch(target);
         const json = await res.json();
         if (json.status === "success") {
           updateTelemetry(json.data);
+          streamStatusText.textContent = "LIVE STREAMING";
         }
       } catch (e) {}
     }, 1000);
@@ -177,7 +270,8 @@ document.addEventListener("DOMContentLoaded", () => {
   // Controls: Overlay toggle
   btnToggleOverlay.addEventListener("click", () => {
     hasOverlay = !hasOverlay;
-    streamImg.src = `/video_feed?overlay=${hasOverlay}&t=${Date.now()}`;
+    const base = backendUrl || "";
+    streamImg.src = `${base}/video_feed?overlay=${hasOverlay}&t=${Date.now()}`;
     btnToggleOverlay.textContent = hasOverlay ? "Hide HUD" : "Show HUD";
   });
 
@@ -197,8 +291,9 @@ document.addEventListener("DOMContentLoaded", () => {
 
   confSlider.addEventListener("change", async (e) => {
     const confFloat = parseFloat(e.target.value) / 100.0;
+    const target = backendUrl ? `${backendUrl}/api/settings` : "/api/settings";
     try {
-      await fetch("/api/settings", {
+      await fetch(target, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ confidence: confFloat })
@@ -227,9 +322,10 @@ document.addEventListener("DOMContentLoaded", () => {
       }
     }
 
+    const target = backendUrl ? `${backendUrl}/api/settings` : "/api/settings";
     try {
       btnApplySource.textContent = "Switching...";
-      const res = await fetch("/api/settings", {
+      const res = await fetch(target, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ source: chosenSource })
@@ -243,8 +339,8 @@ document.addEventListener("DOMContentLoaded", () => {
         currentSourceTag.textContent = `Source: ${data.source}`;
       }
 
-      // Refresh stream image
-      streamImg.src = `/video_feed?overlay=${hasOverlay}&t=${Date.now()}`;
+      const base = backendUrl || "";
+      streamImg.src = `${base}/video_feed?overlay=${hasOverlay}&t=${Date.now()}`;
     } catch (err) {
       btnApplySource.textContent = "Switch";
       alert("Failed to switch video source.");
@@ -293,8 +389,9 @@ document.addEventListener("DOMContentLoaded", () => {
     uploadResult.classList.remove("hidden");
     uploadResult.innerHTML = "<p>Analyzing waste photo with YOLO...</p>";
 
+    const target = backendUrl ? `${backendUrl}/api/upload` : "/api/upload";
     try {
-      const res = await fetch("/api/upload", {
+      const res = await fetch(target, {
         method: "POST",
         body: formData
       });
@@ -337,8 +434,18 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   };
 
-  // Init
-  loadSystemInfo();
-  initWebSocket();
-});
+  // Error fallback on video
+  streamImg.addEventListener("error", () => {
+    if (isVercel && !backendUrl) {
+      bannerStatusTitle.textContent = "Connect Your Stream Source";
+      bannerStatusSub.textContent = "Enter your secure tunnel link (https://...loca.lt) to view video on Vercel";
+    }
+  });
 
+  // Init
+  if (backendUrl) {
+    setBackend(backendUrl);
+  } else {
+    loadSystemInfo();
+  }
+});
