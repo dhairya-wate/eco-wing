@@ -1,18 +1,8 @@
-# Dependencies
 node_modules/
-
-# Environment and sensitive variables
+**/node_modules/
 .env
-.env*.local
-atlas-credentials.env
-
-# Logs
-logs/
+**/.env
 *.log
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-
-# OS metadata
+**/*.log
 .DS_Store
 Thumbs.db
