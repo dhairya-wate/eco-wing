@@ -2,9 +2,6 @@
   "name": "detection",
   "version": "1.0.0",
   "description": "EcoWing AI Waste Detection and Mobile Streamer Portal",
-  "scripts": {
-    "build": "echo 'Static build ready'"
-  },
   "keywords": [
     "ecowing",
     "waste-detection",

@@ -40,8 +40,8 @@ app.add_middleware(
 
 # Paths
 BASE_DIR = Path(__file__).resolve().parent
-TEMPLATES_DIR = BASE_DIR / "templates"
-STATIC_DIR = BASE_DIR / "static"
+TEMPLATES_DIR = (BASE_DIR / "public").exists() and (BASE_DIR / "public") or (BASE_DIR / "templates")
+STATIC_DIR = (BASE_DIR / "public" / "static").exists() and (BASE_DIR / "public" / "static") or (BASE_DIR / "static")
 STATIC_DIR.mkdir(parents=True, exist_ok=True)
 (STATIC_DIR / "css").mkdir(parents=True, exist_ok=True)
 (STATIC_DIR / "js").mkdir(parents=True, exist_ok=True)
@@ -203,6 +203,8 @@ async def websocket_telemetry(websocket: WebSocket):
 def mobile_page():
     """Serves the mobile phone camera streaming interface."""
     mobile_file = TEMPLATES_DIR / "mobile.html"
+    if not mobile_file.exists():
+        mobile_file = BASE_DIR / "templates" / "mobile.html"
     if mobile_file.exists():
         return mobile_file.read_text(encoding="utf-8")
     return "<h1>EcoWing Mobile Stream</h1>"
@@ -240,6 +242,8 @@ async def websocket_mobile_stream(websocket: WebSocket):
 def index_page():
     """Serves the EcoWing detection interface and website integration portal."""
     template_file = TEMPLATES_DIR / "index.html"
+    if not template_file.exists():
+        template_file = BASE_DIR / "templates" / "index.html"
     if template_file.exists():
         return template_file.read_text(encoding="utf-8")
     return "<h1>EcoWing Waste Detection System is Running!</h1>"

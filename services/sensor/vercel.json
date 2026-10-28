@@ -1,19 +1,17 @@
 {
-  "version": 2,
   "cleanUrls": true,
-  "framework": null,
-  "routes": [
+  "rewrites": [
     {
-      "src": "/mobile",
-      "dest": "/templates/mobile.html"
+      "source": "/mobile",
+      "destination": "/mobile.html"
     },
     {
-      "src": "/static/(.*)",
-      "dest": "/static/$1"
+      "source": "/static/(.*)",
+      "destination": "/static/$1"
     },
     {
-      "src": "/(.*)",
-      "dest": "/templates/index.html"
+      "source": "/",
+      "destination": "/index.html"
     }
   ]
 }
