@@ -55,6 +55,158 @@ document.addEventListener("DOMContentLoaded", () => {
   const btnFullscreen = document.getElementById("btn-fullscreen");
   const videoWrapper = document.getElementById("video-wrapper");
 
+  // Device Camera & Relayer Elements
+  const deviceVideo = document.getElementById("device-video");
+  const deviceCanvas = document.getElementById("device-canvas");
+  const tabModeCamera = document.getElementById("tab-mode-camera");
+  const tabModeViewer = document.getElementById("tab-mode-viewer");
+  const btnToggleCamera = document.getElementById("btn-toggle-camera");
+  const liveCameraTag = document.getElementById("live-camera-tag");
+  const targetWebsiteUrl = document.getElementById("target-website-url");
+  const btnStartRelay = document.getElementById("btn-start-relay");
+
+  let localStream = null;
+  let isCameraActive = false;
+  let isRelaying = false;
+  let relayInterval = null;
+  let relayTarget = localStorage.getItem("ecowing_target_website") || "http://localhost:3000";
+
+  if (targetWebsiteUrl) {
+    targetWebsiteUrl.value = relayTarget;
+  }
+
+  // Camera Mode vs Viewer Mode Switching
+  tabModeCamera.addEventListener("click", () => {
+    tabModeCamera.classList.add("active", "btn-primary");
+    tabModeCamera.classList.remove("btn-secondary");
+    tabModeViewer.classList.remove("active", "btn-primary");
+    tabModeViewer.classList.add("btn-secondary");
+
+    deviceVideo.style.display = "block";
+    streamImg.style.display = "none";
+    liveCameraTag.textContent = isCameraActive ? "DEVICE CAMERA ACTIVE" : "DEVICE CAMERA STANDBY";
+  });
+
+  tabModeViewer.addEventListener("click", () => {
+    tabModeViewer.classList.add("active", "btn-primary");
+    tabModeViewer.classList.remove("btn-secondary");
+    tabModeCamera.classList.remove("active", "btn-primary");
+    tabModeCamera.classList.add("btn-secondary");
+
+    deviceVideo.style.display = "none";
+    streamImg.style.display = "block";
+    liveCameraTag.textContent = "AI STREAM VIEWER";
+  });
+
+  // Start / Stop Local Device Camera (Webcam / Mobile Camera)
+  async function toggleDeviceCamera() {
+    if (isCameraActive) {
+      // Stop Camera
+      if (localStream) {
+        localStream.getTracks().forEach(t => t.stop());
+        localStream = null;
+      }
+      deviceVideo.srcObject = null;
+      isCameraActive = false;
+      btnToggleCamera.textContent = "Start Camera";
+      btnToggleCamera.style.background = "rgba(16, 185, 129, 0.2)";
+      currentSourceTag.textContent = "Camera: Offline";
+      liveCameraTag.textContent = "DEVICE CAMERA OFFLINE";
+      if (isRelaying) stopRelaying();
+    } else {
+      // Start Camera
+      try {
+        btnToggleCamera.textContent = "Starting...";
+        const constraints = {
+          video: {
+            width: { ideal: 640 },
+            height: { ideal: 480 },
+            facingMode: "environment"
+          },
+          audio: false
+        };
+        localStream = await navigator.mediaDevices.getUserMedia(constraints);
+        deviceVideo.srcObject = localStream;
+        isCameraActive = true;
+        btnToggleCamera.textContent = "Stop Camera";
+        btnToggleCamera.style.background = "rgba(239, 68, 68, 0.2)";
+        btnToggleCamera.style.borderColor = "#ef4444";
+        btnToggleCamera.style.color = "#ef4444";
+        currentSourceTag.textContent = "Camera: Device Live";
+        liveCameraTag.textContent = "DEVICE CAMERA LIVE";
+      } catch (err) {
+        btnToggleCamera.textContent = "Start Camera";
+        alert("Could not access device camera: " + err.message);
+      }
+    }
+  }
+
+  btnToggleCamera.addEventListener("click", toggleDeviceCamera);
+
+  // Relay Stream to Other Website (POST /api/drone/stream-frame)
+  function startRelaying() {
+    const rawTarget = targetWebsiteUrl.value.trim();
+    if (!rawTarget) {
+      alert("Please enter the destination website URL (e.g. http://localhost:3000 or your Vercel URL)");
+      return;
+    }
+
+    if (!isCameraActive || deviceVideo.videoWidth === 0) {
+      alert("Please click 'Start Camera' first before streaming!");
+      return;
+    }
+
+    relayTarget = rawTarget.replace(/\/$/, "");
+    localStorage.setItem("ecowing_target_website", relayTarget);
+
+    isRelaying = true;
+    btnStartRelay.textContent = "⏹️ Stop Streaming to Website";
+    btnStartRelay.classList.remove("btn-primary");
+    btnStartRelay.style.background = "#ef4444";
+    liveCameraTag.textContent = "STREAMING TO: " + relayTarget;
+
+    const ctx = deviceCanvas.getContext("2d");
+    deviceCanvas.width = 640;
+    deviceCanvas.height = 480;
+
+    // Send frames at 15-20 FPS
+    relayInterval = setInterval(async () => {
+      if (!isRelaying || !isCameraActive || deviceVideo.videoWidth === 0) return;
+
+      ctx.drawImage(deviceVideo, 0, 0, deviceCanvas.width, deviceCanvas.height);
+      const dataUrl = deviceCanvas.toDataURL("image/jpeg", 0.7);
+
+      try {
+        // Send frame to EcoWing Website backend
+        fetch(`${relayTarget}/api/drone/stream-frame`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ frame: dataUrl })
+        }).catch(() => {});
+      } catch (e) {}
+    }, 55);
+  }
+
+  function stopRelaying() {
+    isRelaying = false;
+    if (relayInterval) {
+      clearInterval(relayInterval);
+      relayInterval = null;
+    }
+    btnStartRelay.textContent = "🔴 Stream to Other Website";
+    btnStartRelay.style.background = "";
+    btnStartRelay.classList.add("btn-primary");
+    liveCameraTag.textContent = isCameraActive ? "DEVICE CAMERA LIVE" : "DEVICE CAMERA STANDBY";
+  }
+
+  btnStartRelay.addEventListener("click", () => {
+    if (isRelaying) {
+      stopRelaying();
+    } else {
+      startRelaying();
+    }
+  });
+
   const dropzone = document.getElementById("dropzone");
   const fileInput = document.getElementById("file-input");
   const uploadResult = document.getElementById("upload-result");

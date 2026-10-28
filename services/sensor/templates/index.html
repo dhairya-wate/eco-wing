@@ -101,12 +101,20 @@
       <div class="stream-panel">
         <div class="panel-header">
           <div class="panel-title">
-            <span>📹 Live Camera / Detection Stream</span>
-            <span class="source-tag" id="current-source-tag">Source: Camera 0</span>
+            <!-- Mode Switcher Tabs -->
+            <div style="display: flex; gap: 8px;">
+              <button class="btn btn-primary btn-xs mode-tab-btn active" id="tab-mode-camera">
+                📷 Run Device Camera
+              </button>
+              <button class="btn btn-secondary btn-xs mode-tab-btn" id="tab-mode-viewer">
+                📺 Stream Viewer
+              </button>
+            </div>
+            <span class="source-tag" id="current-source-tag">Camera: Offline</span>
           </div>
           <div class="stream-actions">
-            <button class="btn btn-secondary btn-sm" id="btn-toggle-overlay">
-              Toggle HUD
+            <button class="btn btn-secondary btn-sm" id="btn-toggle-camera" style="background: rgba(16, 185, 129, 0.2); border-color: #10b981; color: #10b981;">
+              Start Camera
             </button>
             <button class="btn btn-secondary btn-sm" id="btn-fullscreen">
               ⛶ Fullscreen
@@ -114,9 +122,27 @@
           </div>
         </div>
 
+        <!-- Video Viewport: Supports both local device camera <video> and incoming <img id="stream-img"> -->
         <div class="video-container" id="video-wrapper">
-          <img id="stream-img" src="/video_feed" alt="EcoWing Detection Live Stream" />
-          <div class="stream-overlay-tag">STREAM ACTIVE</div>
+          <!-- Local Device Camera Video Element -->
+          <video id="device-video" autoplay playsinline muted style="width: 100%; height: 100%; object-fit: cover; display: block;"></video>
+          <canvas id="device-canvas" style="display: none;"></canvas>
+
+          <!-- Remote / AI Stream Element -->
+          <img id="stream-img" src="/video_feed" alt="EcoWing Detection Live Stream" style="display: none; width: 100%; height: 100%; object-fit: contain;" />
+          
+          <div class="stream-overlay-tag" id="live-camera-tag">DEVICE CAMERA READY</div>
+        </div>
+
+        <!-- Destination Stream Relayer Bar -->
+        <div style="background: #11161d; padding: 12px 18px; border-bottom: 1px solid var(--border-color); display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between;">
+          <div style="display: flex; align-items: center; gap: 8px; flex: 1; min-width: 260px;">
+            <span style="font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase;">Relay Stream To Website:</span>
+            <input type="text" id="target-website-url" placeholder="e.g. http://localhost:3000 or https://your-ecowing-site.vercel.app" style="padding: 6px 10px; font-size: 11px; font-family: monospace; flex: 1;" />
+          </div>
+          <button class="btn btn-primary btn-sm" id="btn-start-relay" style="white-space: nowrap;">
+            🔴 Stream to Other Website
+          </button>
         </div>
 
         <!-- Controls Row -->
