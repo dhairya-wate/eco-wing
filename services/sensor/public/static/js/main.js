@@ -3,8 +3,63 @@ document.addEventListener("DOMContentLoaded", () => {
   let systemInfo = null;
   let ws = null;
   let pollInterval = null;
+  let aiModel = null;
+  let detectionLoopActive = false;
 
-  // Backend URL handling (supports local, LAN IP, and public tunnels on Vercel)
+  // Waste Taxonomy Mapping for In-Browser AI Engine
+  const WASTE_MAPPING = {
+    "bottle": { name: "Plastic / Glass Bottle", category: "Bottle", recyclable: true, biodegradable: false, bin: "Blue Bin (Plastics/Glass)", color: "#06b6d4" },
+    "wine glass": { name: "Glassware / Glass", category: "Glass", recyclable: true, biodegradable: false, bin: "Cyan Bin (Glass)", color: "#00e5ff" },
+    "cup": { name: "Beverage Can / Cup", category: "Can / Cup", recyclable: true, biodegradable: false, bin: "Yellow Bin (Metals/Paper)", color: "#f59e0b" },
+    "book": { name: "Paper / Cardboard Waste", category: "Paper", recyclable: true, biodegradable: true, bin: "Blue Bin (Paper/Dry)", color: "#3b82f6" },
+    "banana": { name: "Banana Peel / Food Scrap", category: "Organic Waste", recyclable: false, biodegradable: true, bin: "Green Bin (Compost)", color: "#10b981" },
+    "apple": { name: "Apple Scrap / Food Waste", category: "Organic Waste", recyclable: false, biodegradable: true, bin: "Green Bin (Compost)", color: "#10b981" },
+    "orange": { name: "Orange Peel / Citrus", category: "Organic Waste", recyclable: false, biodegradable: true, bin: "Green Bin (Compost)", color: "#10b981" },
+    "sandwich": { name: "Food Waste Scrap", category: "Organic Waste", recyclable: false, biodegradable: true, bin: "Green Bin (Compost)", color: "#10b981" },
+    "pizza": { name: "Food Residue / Waste", category: "Organic Waste", recyclable: false, biodegradable: true, bin: "Green Bin (Compost)", color: "#10b981" },
+    "donut": { name: "Food Scrap", category: "Organic Waste", recyclable: false, biodegradable: true, bin: "Green Bin (Compost)", color: "#10b981" },
+    "cake": { name: "Food Scrap", category: "Organic Waste", recyclable: false, biodegradable: true, bin: "Green Bin (Compost)", color: "#10b981" },
+    "carrot": { name: "Vegetable Peel", category: "Organic Waste", recyclable: false, biodegradable: true, bin: "Green Bin (Compost)", color: "#10b981" },
+    "broccoli": { name: "Vegetable Scrap", category: "Organic Waste", recyclable: false, biodegradable: true, bin: "Green Bin (Compost)", color: "#10b981" },
+    "bowl": { name: "Plastic / Ceramic Bowl", category: "Plastic / Ceramic", recyclable: true, biodegradable: false, bin: "Recyclable Bin", color: "#64748b" },
+    "fork": { name: "Disposable Cutlery", category: "Plastic Cutlery", recyclable: true, biodegradable: false, bin: "Recyclables", color: "#f59e0b" },
+    "knife": { name: "Disposable Cutlery", category: "Plastic Cutlery", recyclable: true, biodegradable: false, bin: "Recyclables", color: "#f59e0b" },
+    "spoon": { name: "Disposable Cutlery", category: "Plastic Cutlery", recyclable: true, biodegradable: false, bin: "Recyclables", color: "#f59e0b" }
+  };
+
+  function resolveWasteClass(rawClass) {
+    if (!rawClass) return null;
+    const clean = rawClass.toLowerCase().trim();
+    if (WASTE_MAPPING[clean]) return WASTE_MAPPING[clean];
+    for (const k in WASTE_MAPPING) {
+      if (clean.includes(k) || k.includes(clean)) return WASTE_MAPPING[k];
+    }
+    return null;
+  }
+
+  // Load in-browser AI model (TensorFlow.js COCO-SSD)
+  const aiModelBadge = document.getElementById("ai-model-badge");
+  const aiModelStatus = document.getElementById("ai-model-status");
+
+  async function loadAIModel() {
+    if (typeof cocoSsd === "undefined") {
+      if (aiModelStatus) aiModelStatus.textContent = "AI: Cloud Mode";
+      return;
+    }
+    try {
+      if (aiModelStatus) aiModelStatus.textContent = "AI: Initializing Neural Net...";
+      aiModel = await cocoSsd.load({ base: "mobilenet_v2" });
+      if (aiModelStatus) aiModelStatus.textContent = "AI: Active (On-Device)";
+      if (aiModelBadge) aiModelBadge.style.borderColor = "#10b981";
+      console.log("In-browser AI Waste Detection Model ready!");
+    } catch (err) {
+      console.warn("Could not load local TFJS model, falling back to server:", err);
+      if (aiModelStatus) aiModelStatus.textContent = "AI: Standby";
+    }
+  }
+  loadAIModel();
+
+  // Backend URL handling
   const isVercel = window.location.hostname.includes("vercel.app");
   let backendUrl = localStorage.getItem("ecowing_backend_url") || "";
   
@@ -12,7 +67,7 @@ document.addEventListener("DOMContentLoaded", () => {
     if (!isVercel) {
       backendUrl = window.location.origin;
     } else {
-      backendUrl = ""; // Needs user to connect tunnel
+      backendUrl = "";
     }
   }
 
@@ -26,6 +81,15 @@ document.addEventListener("DOMContentLoaded", () => {
   const btnConnectBackend = document.getElementById("btn-connect-backend");
 
   const streamImg = document.getElementById("stream-img");
+  const deviceVideo = document.getElementById("device-video");
+  const annotatedCanvas = document.getElementById("annotated-canvas");
+  const tabModeCamera = document.getElementById("tab-mode-camera");
+  const tabModeViewer = document.getElementById("tab-mode-viewer");
+  const btnToggleCamera = document.getElementById("btn-toggle-camera");
+  const liveCameraTag = document.getElementById("live-camera-tag");
+  const targetWebsiteUrl = document.getElementById("target-website-url");
+  const btnStartRelay = document.getElementById("btn-start-relay");
+
   const valTotal = document.getElementById("val-total");
   const valRec = document.getElementById("val-rec");
   const valNonRec = document.getElementById("val-non-rec");
@@ -45,25 +109,9 @@ document.addEventListener("DOMContentLoaded", () => {
 
   const confSlider = document.getElementById("conf-slider");
   const confVal = document.getElementById("conf-val");
-  const sourceSelect = document.getElementById("source-select");
-  const btnApplySource = document.getElementById("btn-apply-source");
-  const customSourceRow = document.getElementById("custom-source-row");
-  const customSourceInput = document.getElementById("custom-source-input");
   const currentSourceTag = document.getElementById("current-source-tag");
-
-  const btnToggleOverlay = document.getElementById("btn-toggle-overlay");
   const btnFullscreen = document.getElementById("btn-fullscreen");
   const videoWrapper = document.getElementById("video-wrapper");
-
-  // Device Camera & Relayer Elements
-  const deviceVideo = document.getElementById("device-video");
-  const deviceCanvas = document.getElementById("device-canvas");
-  const tabModeCamera = document.getElementById("tab-mode-camera");
-  const tabModeViewer = document.getElementById("tab-mode-viewer");
-  const btnToggleCamera = document.getElementById("btn-toggle-camera");
-  const liveCameraTag = document.getElementById("live-camera-tag");
-  const targetWebsiteUrl = document.getElementById("target-website-url");
-  const btnStartRelay = document.getElementById("btn-start-relay");
 
   let localStream = null;
   let isCameraActive = false;
@@ -71,20 +119,33 @@ document.addEventListener("DOMContentLoaded", () => {
   let relayInterval = null;
   let relayTarget = localStorage.getItem("ecowing_target_website") || "http://localhost:3000";
 
-  if (targetWebsiteUrl) {
-    targetWebsiteUrl.value = relayTarget;
-  }
+  if (targetWebsiteUrl) targetWebsiteUrl.value = relayTarget;
+  if (inputBackendUrl) inputBackendUrl.value = backendUrl;
 
-  // Camera Mode vs Viewer Mode Switching
+  // Initialize Canvas View
+  const initialCtx = annotatedCanvas.getContext("2d");
+  annotatedCanvas.width = 640;
+  annotatedCanvas.height = 480;
+  initialCtx.fillStyle = "#0b0f14";
+  initialCtx.fillRect(0, 0, 640, 480);
+  initialCtx.fillStyle = "#10b981";
+  initialCtx.font = "bold 18px Plus Jakarta Sans, sans-serif";
+  initialCtx.textAlign = "center";
+  initialCtx.fillText("ECOWING AI WASTE DETECTOR", 320, 230);
+  initialCtx.fillStyle = "#8b949e";
+  initialCtx.font = "14px Plus Jakarta Sans, sans-serif";
+  initialCtx.fillText("Click 'Start Camera' above to begin AI waste classification", 320, 260);
+
+  // Mode Switchers
   tabModeCamera.addEventListener("click", () => {
     tabModeCamera.classList.add("active", "btn-primary");
     tabModeCamera.classList.remove("btn-secondary");
     tabModeViewer.classList.remove("active", "btn-primary");
     tabModeViewer.classList.add("btn-secondary");
 
-    deviceVideo.style.display = "block";
+    annotatedCanvas.style.display = "block";
     streamImg.style.display = "none";
-    liveCameraTag.textContent = isCameraActive ? "DEVICE CAMERA ACTIVE" : "DEVICE CAMERA STANDBY";
+    liveCameraTag.textContent = isCameraActive ? "AI WASTE DETECTOR LIVE" : "AI DETECTOR STANDBY";
   });
 
   tabModeViewer.addEventListener("click", () => {
@@ -93,28 +154,30 @@ document.addEventListener("DOMContentLoaded", () => {
     tabModeCamera.classList.remove("active", "btn-primary");
     tabModeCamera.classList.add("btn-secondary");
 
-    deviceVideo.style.display = "none";
+    annotatedCanvas.style.display = "none";
     streamImg.style.display = "block";
     liveCameraTag.textContent = "AI STREAM VIEWER";
   });
 
-  // Start / Stop Local Device Camera (Webcam / Mobile Camera)
+  // Start / Stop Device Camera
   async function toggleDeviceCamera() {
     if (isCameraActive) {
-      // Stop Camera
       if (localStream) {
         localStream.getTracks().forEach(t => t.stop());
         localStream = null;
       }
       deviceVideo.srcObject = null;
       isCameraActive = false;
+      detectionLoopActive = false;
+
       btnToggleCamera.textContent = "Start Camera";
       btnToggleCamera.style.background = "rgba(16, 185, 129, 0.2)";
+      btnToggleCamera.style.borderColor = "#10b981";
+      btnToggleCamera.style.color = "#10b981";
       currentSourceTag.textContent = "Camera: Offline";
       liveCameraTag.textContent = "DEVICE CAMERA OFFLINE";
       if (isRelaying) stopRelaying();
     } else {
-      // Start Camera
       try {
         btnToggleCamera.textContent = "Starting...";
         const constraints = {
@@ -127,31 +190,151 @@ document.addEventListener("DOMContentLoaded", () => {
         };
         localStream = await navigator.mediaDevices.getUserMedia(constraints);
         deviceVideo.srcObject = localStream;
+        await deviceVideo.play();
+
         isCameraActive = true;
+        detectionLoopActive = true;
+
         btnToggleCamera.textContent = "Stop Camera";
         btnToggleCamera.style.background = "rgba(239, 68, 68, 0.2)";
         btnToggleCamera.style.borderColor = "#ef4444";
         btnToggleCamera.style.color = "#ef4444";
         currentSourceTag.textContent = "Camera: Device Live";
-        liveCameraTag.textContent = "DEVICE CAMERA LIVE";
+        liveCameraTag.textContent = "AI DETECTING WASTE...";
+
+        // Start real-time AI detection loop
+        runRealtimeDetection();
       } catch (err) {
         btnToggleCamera.textContent = "Start Camera";
-        alert("Could not access device camera: " + err.message);
+        alert("Camera error: " + err.message);
       }
     }
   }
-
   btnToggleCamera.addEventListener("click", toggleDeviceCamera);
 
-  // Relay Stream to Other Website (POST /api/drone/stream-frame)
+  // Real-Time In-Browser AI Waste Detection Loop
+  async function runRealtimeDetection() {
+    if (!detectionLoopActive || !isCameraActive) return;
+
+    if (deviceVideo.readyState === 4) {
+      const w = deviceVideo.videoWidth || 640;
+      const h = deviceVideo.videoHeight || 480;
+
+      if (annotatedCanvas.width !== w || annotatedCanvas.height !== h) {
+        annotatedCanvas.width = w;
+        annotatedCanvas.height = h;
+      }
+
+      const ctx = annotatedCanvas.getContext("2d");
+      ctx.drawImage(deviceVideo, 0, 0, w, h);
+
+      if (aiModel) {
+        try {
+          const predictions = await aiModel.detect(deviceVideo);
+          const minConf = (parseFloat(confSlider.value) || 35) / 100.0;
+          let wasteItems = [];
+          let recCount = 0;
+          let bioCount = 0;
+
+          predictions.forEach(pred => {
+            const taxonomy = resolveWasteClass(pred.class);
+            // Strictly show WASTE items only!
+            if (!taxonomy || pred.score < minConf) return;
+
+            const [bx, by, bw, bh] = pred.bbox;
+            const confPct = Math.round(pred.score * 100);
+
+            if (taxonomy.recyclable) recCount++;
+            if (taxonomy.biodegradable) bioCount++;
+
+            wasteItems.push({
+              name: taxonomy.name,
+              category: taxonomy.category,
+              confidence: confPct,
+              recyclable: taxonomy.recyclable,
+              biodegradable: taxonomy.biodegradable,
+              bin: taxonomy.bin,
+              bbox: [bx, by, bx + bw, by + bh]
+            });
+
+            // Draw bounding box
+            ctx.strokeStyle = taxonomy.color;
+            ctx.lineWidth = 3;
+            ctx.strokeRect(bx, by, bw, bh);
+
+            // Corner accents
+            const clen = Math.min(20, bw / 4, bh / 4);
+            ctx.lineWidth = 4;
+            ctx.beginPath();
+            ctx.moveTo(bx, by + clen); ctx.lineTo(bx, by); ctx.lineTo(bx + clen, by);
+            ctx.moveTo(bx + bw - clen, by); ctx.lineTo(bx + bw, by); ctx.lineTo(bx + bw, by + clen);
+            ctx.moveTo(bx, by + bh - clen); ctx.lineTo(bx, by + bh); ctx.lineTo(bx + clen, by + bh);
+            ctx.moveTo(bx + bw - clen, by + bh); ctx.lineTo(bx + bw, by + bh); ctx.lineTo(bx + bw, by + bh - clen);
+            ctx.stroke();
+
+            // Header text badge
+            ctx.fillStyle = taxonomy.color;
+            const label = `${taxonomy.name} ${confPct}%`;
+            ctx.font = "bold 13px 'Plus Jakarta Sans', sans-serif";
+            const textWidth = ctx.measureText(label).width;
+            const badgeY = Math.max(by - 26, 6);
+            ctx.fillRect(bx, badgeY, Math.max(textWidth + 14, 180), 22);
+
+            ctx.fillStyle = "#000000";
+            ctx.fillText(label, bx + 6, badgeY + 16);
+
+            // Sub pills (Recyclable & Biodegradable)
+            const subY = badgeY + 24;
+            ctx.fillStyle = taxonomy.recyclable ? "#10b981" : "#ef4444";
+            ctx.fillRect(bx, subY, 82, 16);
+            ctx.fillStyle = "#ffffff";
+            ctx.font = "bold 10px 'Plus Jakarta Sans', sans-serif";
+            ctx.fillText(taxonomy.recyclable ? "REC: YES" : "REC: NO", bx + 6, subY + 12);
+
+            ctx.fillStyle = taxonomy.biodegradable ? "#34d399" : "#64748b";
+            ctx.fillRect(bx + 86, subY, 82, 16);
+            ctx.fillStyle = "#ffffff";
+            ctx.fillText(taxonomy.biodegradable ? "BIO: YES" : "BIO: NO", bx + 92, subY + 12);
+          });
+
+          // Draw Top HUD on canvas
+          ctx.fillStyle = "rgba(18, 22, 28, 0.85)";
+          ctx.fillRect(0, 0, w, 38);
+          ctx.fillStyle = "#10b981";
+          ctx.font = "bold 14px 'Plus Jakarta Sans', sans-serif";
+          ctx.textAlign = "left";
+          ctx.fillText("ECOWING AI WASTE SORTER", 14, 24);
+          ctx.fillStyle = "#ffffff";
+          ctx.font = "12px 'Plus Jakarta Sans', sans-serif";
+          ctx.fillText(`WASTE: ${wasteItems.length} | RECYCLABLE: ${recCount} | BIO: ${bioCount}`, 240, 24);
+
+          // Update metrics cards on web page
+          updateTelemetry({
+            total_count: wasteItems.length,
+            recyclable_count: recCount,
+            non_recyclable_count: wasteItems.length - recCount,
+            biodegradable_count: bioCount,
+            non_biodegradable_count: wasteItems.length - bioCount,
+            items: wasteItems
+          });
+        } catch (e) {
+          console.error("AI detection error:", e);
+        }
+      }
+    }
+
+    requestAnimationFrame(runRealtimeDetection);
+  }
+
+  // Stream Relayer: Pushes annotated frame with bounding boxes to other website
   function startRelaying() {
     const rawTarget = targetWebsiteUrl.value.trim();
     if (!rawTarget) {
-      alert("Please enter the destination website URL (e.g. http://localhost:3000 or your Vercel URL)");
+      alert("Please enter the destination website URL (e.g. http://localhost:3000 or your EcoWing website link)");
       return;
     }
 
-    if (!isCameraActive || deviceVideo.videoWidth === 0) {
+    if (!isCameraActive) {
       alert("Please click 'Start Camera' first before streaming!");
       return;
     }
@@ -163,27 +346,18 @@ document.addEventListener("DOMContentLoaded", () => {
     btnStartRelay.textContent = "⏹️ Stop Streaming to Website";
     btnStartRelay.classList.remove("btn-primary");
     btnStartRelay.style.background = "#ef4444";
-    liveCameraTag.textContent = "STREAMING TO: " + relayTarget;
+    liveCameraTag.textContent = "STREAMING LIVE TO: " + relayTarget;
 
-    const ctx = deviceCanvas.getContext("2d");
-    deviceCanvas.width = 640;
-    deviceCanvas.height = 480;
+    // Push frames at ~18 FPS
+    relayInterval = setInterval(() => {
+      if (!isRelaying || !isCameraActive || annotatedCanvas.width === 0) return;
 
-    // Send frames at 15-20 FPS
-    relayInterval = setInterval(async () => {
-      if (!isRelaying || !isCameraActive || deviceVideo.videoWidth === 0) return;
-
-      ctx.drawImage(deviceVideo, 0, 0, deviceCanvas.width, deviceCanvas.height);
-      const dataUrl = deviceCanvas.toDataURL("image/jpeg", 0.7);
-
-      try {
-        // Send frame to EcoWing Website backend
-        fetch(`${relayTarget}/api/drone/stream-frame`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ frame: dataUrl })
-        }).catch(() => {});
-      } catch (e) {}
+      const dataUrl = annotatedCanvas.toDataURL("image/jpeg", 0.72);
+      fetch(`${relayTarget}/api/drone/stream-frame`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ frame: dataUrl })
+      }).catch(() => {});
     }, 55);
   }
 
@@ -196,55 +370,38 @@ document.addEventListener("DOMContentLoaded", () => {
     btnStartRelay.textContent = "🔴 Stream to Other Website";
     btnStartRelay.style.background = "";
     btnStartRelay.classList.add("btn-primary");
-    liveCameraTag.textContent = isCameraActive ? "DEVICE CAMERA LIVE" : "DEVICE CAMERA STANDBY";
+    liveCameraTag.textContent = isCameraActive ? "AI WASTE DETECTOR LIVE" : "AI DETECTOR STANDBY";
   }
 
   btnStartRelay.addEventListener("click", () => {
-    if (isRelaying) {
-      stopRelaying();
-    } else {
-      startRelaying();
-    }
+    if (isRelaying) stopRelaying();
+    else startRelaying();
   });
 
-  const dropzone = document.getElementById("dropzone");
-  const fileInput = document.getElementById("file-input");
-  const uploadResult = document.getElementById("upload-result");
-
-  if (inputBackendUrl) {
-    inputBackendUrl.value = backendUrl;
-  }
-
-  // Connect Backend Logic
+  // Backend URL handling
   function setBackend(url) {
     if (!url) return;
     url = url.trim().replace(/\/$/, "");
 
-    // Check mixed content security
     if (window.location.protocol === "https:" && url.startsWith("http://")) {
-      alert("⚠️ Mixed Content Warning:\n\nBecause this page is on HTTPS (Vercel), web browsers block unencrypted 'http://' streams.\n\nPlease either:\n1. Use a secure HTTPS tunnel (e.g. double-click 'start_tunnel.bat' to get https://...loca.lt)\n2. OR open the local dashboard directly at http://localhost:5000");
+      alert("⚠️ Mixed Content Warning:\n\nBecause this page is on HTTPS, browsers block unencrypted 'http://' streams.\n\nPlease either:\n1. Use a secure HTTPS tunnel (double-click 'start_tunnel.bat' to get https://...loca.lt)\n2. OR open the local dashboard directly at http://localhost:5000");
     }
 
     backendUrl = url;
     localStorage.setItem("ecowing_backend_url", backendUrl);
     if (inputBackendUrl) inputBackendUrl.value = backendUrl;
 
-    bannerStatusTitle.textContent = "Connecting to " + backendUrl;
+    bannerStatusTitle.textContent = "Connected to " + backendUrl;
     bannerStatusSub.textContent = "Loading stream and telemetry...";
 
-    // Reload stream image
     streamImg.src = `${backendUrl}/video_feed?overlay=${hasOverlay}&t=${Date.now()}`;
-    
     loadSystemInfo();
     initWebSocket();
   }
 
   btnConnectBackend.addEventListener("click", () => {
     const val = inputBackendUrl.value.trim();
-    if (!val) {
-      alert("Please enter a valid backend stream URL (e.g. https://your-tunnel.loca.lt or http://localhost:5000)");
-      return;
-    }
+    if (!val) return alert("Please enter a valid stream URL");
     setBackend(val);
   });
 
@@ -258,7 +415,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const targetUrl = backendUrl ? `${backendUrl}/api/system_info` : "/api/system_info";
     try {
       const res = await fetch(targetUrl);
-      if (!res.ok) throw new Error("Backend offline");
+      if (!res.ok) throw new Error("Offline");
       systemInfo = await res.json();
       
       const ip = systemInfo.local_ip || window.location.hostname;
@@ -270,48 +427,30 @@ document.addEventListener("DOMContentLoaded", () => {
 
       hostIpBadge.textContent = `Backend: ${base.replace(/^https?:\/\//, '')}`;
       bannerStatusTitle.textContent = "Stream Connected: " + base;
-      bannerStatusSub.textContent = "AI Waste Classification Active";
+      bannerStatusSub.textContent = "Dual Classification Active";
       streamStatusText.textContent = "LIVE STREAMING";
 
       inputStreamUrl.value = streamUrl;
       inputApiUrl.value = apiUrl;
-      if (inputMobileUrl) {
-        inputMobileUrl.value = mobileUrl;
-      }
+      if (inputMobileUrl) inputMobileUrl.value = mobileUrl;
       if (qrCodeImg) {
         qrCodeImg.src = `https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=${encodeURIComponent(mobileUrl)}`;
         qrCodeImg.classList.remove("hidden");
       }
 
-      codeHtml.textContent = `<img \n  src="${streamUrl}" \n  alt="EcoWing Waste Stream" \n  style="width: 100%; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.15);" \n/>`;
-      codeReact.textContent = `<img \n  src="${streamUrl}" \n  alt="EcoWing Waste Stream" \n  className="w-full rounded-2xl border border-emerald-500/20 shadow-xl" \n/>`;
-      codeJs.textContent = `// Poll live waste detections from EcoWing Detection Server:\nasync function checkWaste() {\n  const res = await fetch("${apiUrl}");\n  const data = await res.json();\n  console.log("Waste items:", data.data.items);\n}`;
-
-      if (systemInfo.is_simulator) {
-        currentSourceTag.textContent = "Source: Demo Simulator";
-      } else {
-        currentSourceTag.textContent = `Source: Camera ${systemInfo.current_source}`;
-      }
-
-      if (systemInfo.confidence_threshold) {
-        const pct = Math.round(systemInfo.confidence_threshold * 100);
-        confSlider.value = pct;
-        confVal.textContent = `${pct}%`;
-      }
+      codeHtml.textContent = `<img src="${streamUrl}" alt="EcoWing Stream" style="width: 100%; border-radius: 12px;" />`;
+      codeReact.textContent = `<img src="${streamUrl}" alt="EcoWing Stream" className="w-full rounded-2xl" />`;
+      codeJs.textContent = `fetch("${apiUrl}").then(r => r.json()).then(d => console.log(d.data.items));`;
     } catch (err) {
       if (isVercel && !backendUrl) {
-        bannerStatusTitle.textContent = "Backend Stream Disconnected";
-        bannerStatusSub.textContent = "Paste your tunnel link (https://...loca.lt) above to start stream on Vercel";
-        streamStatusText.textContent = "STREAM OFFLINE";
-      } else {
-        bannerStatusTitle.textContent = "Backend Connection Failed";
-        bannerStatusSub.textContent = "Ensure 'python run.py' or tunnel is running on your machine";
-        streamStatusText.textContent = "OFFLINE";
+        bannerStatusTitle.textContent = "On-Device AI Active";
+        bannerStatusSub.textContent = "Using in-browser AI engine (click 'Start Camera' to begin)";
+        streamStatusText.textContent = "LOCAL AI READY";
       }
     }
   }
 
-  // Update telemetry dashboard
+  // Update telemetry metrics cards
   function updateTelemetry(data) {
     if (!data) return;
 
@@ -379,26 +518,16 @@ document.addEventListener("DOMContentLoaded", () => {
 
     try {
       ws = new WebSocket(wsUrl);
-      ws.onopen = () => {
-        streamStatusText.textContent = "LIVE STREAMING";
-      };
-
       ws.onmessage = (event) => {
         try {
           const payload = JSON.parse(event.data);
-          if (payload.type === "telemetry") {
+          if (payload.type === "telemetry" && !isCameraActive) {
             updateTelemetry(payload.summary);
           }
         } catch (e) {}
       };
-
-      ws.onerror = () => {
-        startPolling();
-      };
-
-      ws.onclose = () => {
-        startPolling();
-      };
+      ws.onerror = () => startPolling();
+      ws.onclose = () => startPolling();
     } catch (e) {
       startPolling();
     }
@@ -407,6 +536,7 @@ document.addEventListener("DOMContentLoaded", () => {
   function startPolling() {
     if (pollInterval) clearInterval(pollInterval);
     pollInterval = setInterval(async () => {
+      if (isCameraActive) return; // In camera mode, local AI handles telemetry
       const target = backendUrl ? `${backendUrl}/api/detections` : "/api/detections";
       try {
         const res = await fetch(target);
@@ -419,15 +549,7 @@ document.addEventListener("DOMContentLoaded", () => {
     }, 1000);
   }
 
-  // Controls: Overlay toggle
-  btnToggleOverlay.addEventListener("click", () => {
-    hasOverlay = !hasOverlay;
-    const base = backendUrl || "";
-    streamImg.src = `${base}/video_feed?overlay=${hasOverlay}&t=${Date.now()}`;
-    btnToggleOverlay.textContent = hasOverlay ? "Hide HUD" : "Show HUD";
-  });
-
-  // Controls: Fullscreen
+  // Fullscreen
   btnFullscreen.addEventListener("click", () => {
     if (!document.fullscreenElement) {
       videoWrapper.requestFullscreen().catch(err => alert(err.message));
@@ -439,64 +561,6 @@ document.addEventListener("DOMContentLoaded", () => {
   // Confidence Slider
   confSlider.addEventListener("input", (e) => {
     confVal.textContent = `${e.target.value}%`;
-  });
-
-  confSlider.addEventListener("change", async (e) => {
-    const confFloat = parseFloat(e.target.value) / 100.0;
-    const target = backendUrl ? `${backendUrl}/api/settings` : "/api/settings";
-    try {
-      await fetch(target, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ confidence: confFloat })
-      });
-    } catch (err) {
-      console.error("Error setting confidence:", err);
-    }
-  });
-
-  // Source selection dropdown
-  sourceSelect.addEventListener("change", (e) => {
-    if (e.target.value === "custom") {
-      customSourceRow.classList.remove("hidden");
-    } else {
-      customSourceRow.classList.add("hidden");
-    }
-  });
-
-  btnApplySource.addEventListener("click", async () => {
-    let chosenSource = sourceSelect.value;
-    if (chosenSource === "custom") {
-      chosenSource = customSourceInput.value.trim();
-      if (!chosenSource) {
-        alert("Please enter a valid video path or RTSP URL.");
-        return;
-      }
-    }
-
-    const target = backendUrl ? `${backendUrl}/api/settings` : "/api/settings";
-    try {
-      btnApplySource.textContent = "Switching...";
-      const res = await fetch(target, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ source: chosenSource })
-      });
-      const data = await res.json();
-      btnApplySource.textContent = "Switch";
-      
-      if (data.is_simulator) {
-        currentSourceTag.textContent = "Source: Demo Simulator";
-      } else {
-        currentSourceTag.textContent = `Source: ${data.source}`;
-      }
-
-      const base = backendUrl || "";
-      streamImg.src = `${base}/video_feed?overlay=${hasOverlay}&t=${Date.now()}`;
-    } catch (err) {
-      btnApplySource.textContent = "Switch";
-      alert("Failed to switch video source.");
-    }
   });
 
   // Snippet Tabs
@@ -511,70 +575,6 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   });
 
-  // File Upload Dropzone
-  dropzone.addEventListener("click", () => fileInput.click());
-  dropzone.addEventListener("dragover", (e) => {
-    e.preventDefault();
-    dropzone.style.borderColor = "#10b981";
-  });
-  dropzone.addEventListener("dragleave", () => {
-    dropzone.style.borderColor = "";
-  });
-  dropzone.addEventListener("drop", (e) => {
-    e.preventDefault();
-    dropzone.style.borderColor = "";
-    if (e.dataTransfer.files.length > 0) {
-      handleFileUpload(e.dataTransfer.files[0]);
-    }
-  });
-
-  fileInput.addEventListener("change", (e) => {
-    if (e.target.files.length > 0) {
-      handleFileUpload(e.target.files[0]);
-    }
-  });
-
-  async function handleFileUpload(file) {
-    const formData = new FormData();
-    formData.append("file", file);
-
-    uploadResult.classList.remove("hidden");
-    uploadResult.innerHTML = "<p>Analyzing waste photo with YOLO...</p>";
-
-    const target = backendUrl ? `${backendUrl}/api/upload` : "/api/upload";
-    try {
-      const res = await fetch(target, {
-        method: "POST",
-        body: formData
-      });
-      const data = await res.json();
-
-      if (data.status === "success") {
-        let itemsHtml = "";
-        data.analysis.items.forEach(item => {
-          itemsHtml += `
-            <div style="font-size: 12px; margin-top: 4px;">
-              <strong>${item.name} (${item.confidence}%):</strong> 
-              Recyclable: ${item.recyclable ? 'YES' : 'NO'} | 
-              Bio-degradable: ${item.biodegradable ? 'YES' : 'NO'} | 
-              Bin: ${item.bin}
-            </div>
-          `;
-        });
-
-        uploadResult.innerHTML = `
-          <img src="${data.annotated_image}" alt="Processed Waste Image" />
-          <h5 style="color: #10b981; font-size: 13px;">Found ${data.analysis.total_count} Waste Items</h5>
-          ${itemsHtml || '<p style="font-size: 12px; color: #888;">No waste items detected in uploaded image.</p>'}
-        `;
-      } else {
-        uploadResult.innerHTML = `<p style="color: #ef4444;">Upload error: ${data.error}</p>`;
-      }
-    } catch (err) {
-      uploadResult.innerHTML = `<p style="color: #ef4444;">Failed to upload image.</p>`;
-    }
-  }
-
   // Copy helper
   window.copyText = function(elementId, isCode = false) {
     const el = document.getElementById(elementId);
@@ -586,18 +586,7 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   };
 
-  // Error fallback on video
-  streamImg.addEventListener("error", () => {
-    if (isVercel && !backendUrl) {
-      bannerStatusTitle.textContent = "Connect Your Stream Source";
-      bannerStatusSub.textContent = "Enter your secure tunnel link (https://...loca.lt) to view video on Vercel";
-    }
-  });
-
   // Init
-  if (backendUrl) {
-    setBackend(backendUrl);
-  } else {
-    loadSystemInfo();
-  }
+  if (backendUrl) setBackend(backendUrl);
+  else loadSystemInfo();
 });

@@ -8,6 +8,9 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+  <!-- In-Browser Real-Time AI Detection Engine -->
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.20.0/dist/tf.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.3/dist/coco-ssd.min.js"></script>
 </head>
 <body>
   <div class="app-container">
@@ -27,6 +30,9 @@
       </div>
 
       <div class="header-badges">
+        <div class="badge status-live" id="ai-model-badge" style="background: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.3);">
+          <span class="pulse-dot"></span> <span id="ai-model-status">AI: Loading Model...</span>
+        </div>
         <div class="badge status-live" id="stream-status-badge">
           <span class="pulse-dot"></span> <span id="stream-status-text">CONNECTING...</span>
         </div>
@@ -122,16 +128,18 @@
           </div>
         </div>
 
-        <!-- Video Viewport: Supports both local device camera <video> and incoming <img id="stream-img"> -->
+        <!-- Video Viewport: Supports both local device camera <canvas> and incoming <img id="stream-img"> -->
         <div class="video-container" id="video-wrapper">
-          <!-- Local Device Camera Video Element -->
-          <video id="device-video" autoplay playsinline muted style="width: 100%; height: 100%; object-fit: cover; display: block;"></video>
+          <!-- Local Device Camera Video Element (Hidden offscreen, rendered with AI boxes onto canvas) -->
+          <video id="device-video" autoplay playsinline muted style="display: none;"></video>
+          <!-- Annotated AI Canvas (shows camera + glowing bounding boxes + classification tags) -->
+          <canvas id="annotated-canvas" style="width: 100%; height: 100%; object-fit: contain; display: block;"></canvas>
           <canvas id="device-canvas" style="display: none;"></canvas>
 
           <!-- Remote / AI Stream Element -->
           <img id="stream-img" src="/video_feed" alt="EcoWing Detection Live Stream" style="display: none; width: 100%; height: 100%; object-fit: contain;" />
           
-          <div class="stream-overlay-tag" id="live-camera-tag">DEVICE CAMERA READY</div>
+          <div class="stream-overlay-tag" id="live-camera-tag">AI WASTE DETECTOR READY</div>
         </div>
 
         <!-- Destination Stream Relayer Bar -->
