@@ -3,10 +3,17 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>EcoWing Mobile AI Camera</title>
+  <title>EcoWing Mobile AI Camera Broadcaster</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;700;800&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+  
+  <!-- PeerJS for Direct WebRTC Live Broadcast to EcoWing Website -->
+  <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+  <!-- In-Browser Real-Time AI Waste Detection -->
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.20.0/dist/tf.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.3/dist/coco-ssd.min.js"></script>
+
   <style>
     * {
       margin: 0;
@@ -27,7 +34,6 @@
       flex-direction: column;
     }
 
-    /* Video Viewport */
     .viewport {
       position: relative;
       flex: 1;
@@ -40,10 +46,16 @@
       overflow: hidden;
     }
 
+    /* Video & Canvas Elements */
     #camera-video {
+      display: none;
+    }
+
+    #stream-canvas {
       width: 100%;
       height: 100%;
       object-fit: cover;
+      display: block;
     }
 
     /* Top HUD */
@@ -100,32 +112,6 @@
       100% { opacity: 0.4; }
     }
 
-    /* Reticle */
-    .reticle {
-      position: absolute;
-      top: 50%;
-      left: 50%;
-      transform: translate(-50%, -50%);
-      width: 220px;
-      height: 220px;
-      border: 2px dashed rgba(16, 185, 129, 0.6);
-      border-radius: 20px;
-      pointer-events: none;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-    }
-
-    .reticle::before {
-      content: "POINT AT WASTE";
-      font-size: 10px;
-      font-weight: 700;
-      letter-spacing: 1px;
-      color: rgba(16, 185, 129, 0.8);
-      position: absolute;
-      bottom: -24px;
-    }
-
     /* Live Waste Banner */
     .detection-banner {
       position: absolute;
@@ -142,7 +128,6 @@
       gap: 6px;
       box-shadow: 0 8px 24px rgba(0,0,0,0.5);
       z-index: 10;
-      transition: all 0.3s;
     }
 
     .banner-header {
@@ -265,7 +250,7 @@
       100% { opacity: 0; }
     }
 
-    /* Splash / Permission overlay */
+    /* Splash / Start Screen */
     .splash-screen {
       position: fixed;
       inset: 0;
@@ -299,7 +284,7 @@
       background: #10b981;
       color: #fff;
       border: none;
-      padding: 14px 32px;
+      padding: 16px 36px;
       border-radius: 30px;
       font-size: 16px;
       font-weight: 700;
@@ -314,18 +299,18 @@
   <!-- Permission Splash -->
   <div class="splash-screen" id="splash-screen">
     <div class="splash-icon">🌱</div>
-    <h2 class="splash-title">EcoWing Mobile Stream</h2>
+    <h2 class="splash-title">EcoWing Phone Streamer</h2>
     <p class="splash-text">
-      Use your phone as a wireless AI waste camera. Point at paper, glass, can, cardboard, or food scrap to stream live to the EcoWing website.
+      This turns your phone into an AI waste scanner that <strong>automatically broadcasts live video</strong> directly into the EcoWing website!
     </p>
-    <button class="btn-start" id="btn-start-camera">Start Camera Stream</button>
+    <button class="btn-start" id="btn-start-camera">Start Live Broadcast</button>
   </div>
 
   <!-- AMOLED Screen Off / Blackout Layer -->
   <div class="screen-off-overlay" id="screen-off-layer">
     <div class="screen-off-hint" id="screen-off-hint">
       🔒 Screen-Off AMOLED Mode Active<br>
-      Camera streaming in background<br>
+      Broadcasting live to EcoWing<br>
       <small style="font-size: 11px; opacity: 0.7;">(Double-tap anywhere to wake)</small>
     </div>
   </div>
@@ -333,34 +318,26 @@
   <!-- Main Viewport -->
   <div class="viewport">
     <video id="camera-video" autoplay playsinline muted></video>
-    <canvas id="capture-canvas" style="display: none;"></canvas>
+    <canvas id="stream-canvas"></canvas>
 
     <!-- Top Bar -->
     <div class="top-bar">
       <div class="brand-title">
-        EcoWing <span>Mobile</span>
+        EcoWing <span>Broadcaster</span>
       </div>
-      <div style="display: flex; gap: 8px; align-items: center;">
-        <button id="btn-config-server" style="background: rgba(255,255,255,0.15); border: 1px solid rgba(255,255,255,0.3); color: #fff; border-radius: 12px; padding: 4px 10px; font-size: 11px; cursor: pointer;">
-          ⚙️ Server
-        </button>
-        <div class="status-pill" id="status-pill">
-          <span class="status-dot"></span>
-          <span id="status-text">CONNECTING...</span>
-        </div>
+      <div class="status-pill" id="status-pill">
+        <span class="status-dot"></span>
+        <span id="status-text">INITIALIZING...</span>
       </div>
     </div>
-
-    <!-- Reticle -->
-    <div class="reticle"></div>
 
     <!-- Live Waste Result Banner -->
     <div class="detection-banner" id="detection-banner">
       <div class="banner-header">
-        <span class="item-name" id="banner-name">Scanning for Waste...</span>
+        <span class="item-name" id="banner-name">AI Waste Scanner Active</span>
         <div class="badge-tags" id="banner-tags"></div>
       </div>
-      <div class="bin-info" id="banner-bin">Aim at bottles, cans, paper, cardboard, or food scrap</div>
+      <div class="bin-info" id="banner-bin">Aim camera at bottle, can, paper, cardboard, or food scrap</div>
     </div>
 
     <!-- Bottom Controls -->
@@ -379,12 +356,12 @@
         </svg>
       </button>
 
-      <!-- Stream Toggle (Center Large Button) -->
+      <!-- Stream Toggle -->
       <button class="btn-circle btn-stream" id="btn-stream" title="Pause/Resume Stream">
-        <svg id="stream-icon-stop" viewBox="0 0 24 24" fill="currentColor" style="display:none; width: 28px; height: 28px;">
+        <svg id="stream-icon-stop" viewBox="0 0 24 24" fill="currentColor" style="width: 28px; height: 28px;">
           <rect x="6" y="6" width="12" height="12" rx="2" />
         </svg>
-        <svg id="stream-icon-play" viewBox="0 0 24 24" fill="currentColor" style="width: 28px; height: 28px;">
+        <svg id="stream-icon-play" viewBox="0 0 24 24" fill="currentColor" style="display:none; width: 28px; height: 28px;">
           <polygon points="5,3 19,12 5,21" />
         </svg>
       </button>
@@ -400,7 +377,7 @@
 
   <script>
     const video = document.getElementById('camera-video');
-    const canvas = document.getElementById('capture-canvas');
+    const canvas = document.getElementById('stream-canvas');
     const ctx = canvas.getContext('2d');
     const splash = document.getElementById('splash-screen');
     const btnStart = document.getElementById('btn-start-camera');
@@ -420,14 +397,49 @@
 
     let currentStream = null;
     let facingMode = 'environment';
-    let isStreaming = false;
-    let ws = null;
-    let streamInterval = null;
+    let isBroadcasting = true;
     let track = null;
     let torchOn = false;
     let lastTap = 0;
+    let aiModel = null;
+    let peer = null;
+    let canvasMediaStream = null;
 
-    // WakeLock keeps mobile CPU awake while screen is blacked out
+    // EcoWing target website endpoint
+    const ECOWING_TARGET = "https://eco-wing-7pua.vercel.app";
+
+    // Waste Taxonomy Mapping for AI
+    const WASTE_MAPPING = {
+      "bottle": { name: "Plastic / Glass Bottle", category: "Bottle", recyclable: true, biodegradable: false, bin: "Blue Bin (Plastics/Glass)", color: "#06b6d4" },
+      "wine glass": { name: "Glassware / Glass", category: "Glass", recyclable: true, biodegradable: false, bin: "Cyan Bin (Glass)", color: "#00e5ff" },
+      "cup": { name: "Beverage Can / Cup", category: "Can / Cup", recyclable: true, biodegradable: false, bin: "Yellow Bin (Metals/Paper)", color: "#f59e0b" },
+      "book": { name: "Paper / Cardboard", category: "Paper", recyclable: true, biodegradable: true, bin: "Blue Bin (Paper/Dry)", color: "#3b82f6" },
+      "banana": { name: "Banana Peel / Food Scrap", category: "Organic Waste", recyclable: false, biodegradable: true, bin: "Green Bin (Compost)", color: "#10b981" },
+      "apple": { name: "Apple Scrap / Food Waste", category: "Organic Waste", recyclable: false, biodegradable: true, bin: "Green Bin (Compost)", color: "#10b981" },
+      "orange": { name: "Orange Peel / Citrus", category: "Organic Waste", recyclable: false, biodegradable: true, bin: "Green Bin (Compost)", color: "#10b981" },
+      "sandwich": { name: "Food Waste Scrap", category: "Organic Waste", recyclable: false, biodegradable: true, bin: "Green Bin (Compost)", color: "#10b981" },
+      "pizza": { name: "Food Residue / Scrap", category: "Organic Waste", recyclable: false, biodegradable: true, bin: "Green Bin (Compost)", color: "#10b981" },
+      "donut": { name: "Food Scrap", category: "Organic Waste", recyclable: false, biodegradable: true, bin: "Green Bin (Compost)", color: "#10b981" },
+      "cake": { name: "Food Scrap", category: "Organic Waste", recyclable: false, biodegradable: true, bin: "Green Bin (Compost)", color: "#10b981" },
+      "carrot": { name: "Vegetable Peel", category: "Organic Waste", recyclable: false, biodegradable: true, bin: "Green Bin (Compost)", color: "#10b981" },
+      "broccoli": { name: "Vegetable Scrap", category: "Organic Waste", recyclable: false, biodegradable: true, bin: "Green Bin (Compost)", color: "#10b981" },
+      "bowl": { name: "Plastic / Ceramic Bowl", category: "Plastic / Ceramic", recyclable: true, biodegradable: false, bin: "Recyclable Bin", color: "#64748b" },
+      "fork": { name: "Disposable Cutlery", category: "Plastic Cutlery", recyclable: true, biodegradable: false, bin: "Recyclables", color: "#f59e0b" },
+      "knife": { name: "Disposable Cutlery", category: "Plastic Cutlery", recyclable: true, biodegradable: false, bin: "Recyclables", color: "#f59e0b" },
+      "spoon": { name: "Disposable Cutlery", category: "Plastic Cutlery", recyclable: true, biodegradable: false, bin: "Recyclables", color: "#f59e0b" }
+    };
+
+    function resolveWaste(cls) {
+      if (!cls) return null;
+      const c = cls.toLowerCase().trim();
+      if (WASTE_MAPPING[c]) return WASTE_MAPPING[c];
+      for (const k in WASTE_MAPPING) {
+        if (c.includes(k) || k.includes(c)) return WASTE_MAPPING[k];
+      }
+      return null;
+    }
+
+    // WakeLock keeps phone CPU awake
     let wakeLock = null;
     async function requestWakeLock() {
       try {
@@ -440,7 +452,9 @@
     btnStart.addEventListener('click', async () => {
       splash.style.display = 'none';
       await startCamera();
-      initWebSocket();
+      loadAI();
+      initPeerBroadcaster();
+      startHttpRelay();
       requestWakeLock();
     });
 
@@ -462,11 +476,215 @@
       try {
         currentStream = await navigator.mediaDevices.getUserMedia(constraints);
         video.srcObject = currentStream;
+        await video.play();
         track = currentStream.getVideoTracks()[0];
-        setStreaming(true);
+        
+        // Create canvas stream for WebRTC broadcast
+        canvas.width = 640;
+        canvas.height = 480;
+        if (canvas.captureStream) {
+          canvasMediaStream = canvas.captureStream(25);
+        }
+
+        requestAnimationFrame(processFrame);
       } catch (err) {
-        alert("Camera access denied: " + err.message);
+        alert("Camera permission denied: " + err.message);
       }
+    }
+
+    async function loadAI() {
+      try {
+        statusText.textContent = "LOADING AI...";
+        aiModel = await cocoSsd.load({ base: "mobilenet_v2" });
+        statusText.textContent = "BROADCASTING LIVE";
+      } catch (e) {
+        statusText.textContent = "BROADCASTING LIVE";
+      }
+    }
+
+    // Direct WebRTC Broadcaster to EcoWing Website
+    let activeDataConns = [];
+    let lastDetectionBroadcastTime = 0;
+
+    function initPeerBroadcaster() {
+      // Connect to public PeerJS cloud with fixed broadcaster ID
+      peer = new Peer('ecowing-live-drone', {
+        debug: 1,
+        config: {
+          iceServers: [
+            { urls: 'stun:stun.l.google.com:19302' },
+            { urls: 'stun:global.stun.twilio.com:3478' }
+          ]
+        }
+      });
+
+      peer.on('open', (id) => {
+        console.log('Peer broadcaster ready with ID:', id);
+        statusText.textContent = "BROADCASTING LIVE";
+        statusPill.style.borderColor = "#10b981";
+      });
+
+      // When EcoWing website connects for video stream
+      peer.on('call', (call) => {
+        console.log('EcoWing website connected! Answering with live AI stream...');
+        if (canvasMediaStream) {
+          call.answer(canvasMediaStream);
+        }
+      });
+
+      // When EcoWing website connects data channel for detections/telemetry
+      peer.on('connection', (conn) => {
+        console.log('EcoWing data channel connected!');
+        activeDataConns.push(conn);
+        conn.on('close', () => {
+          activeDataConns = activeDataConns.filter(c => c !== conn);
+        });
+      });
+
+      peer.on('error', (err) => {
+        console.warn('Peer status:', err.type);
+        // If ID is in use, retry after random delay
+        if (err.type === 'unavailable-id') {
+          setTimeout(initPeerBroadcaster, 4000);
+        }
+      });
+    }
+
+    // Backup HTTP frame broadcaster (posts to EcoWing backend)
+    function startHttpRelay() {
+      setInterval(() => {
+        if (!isBroadcasting || canvas.width === 0) return;
+        const dataUrl = canvas.toDataURL("image/jpeg", 0.68);
+        fetch(`${ECOWING_TARGET}/api/drone/stream-frame`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ frame: dataUrl })
+        }).catch(() => {});
+      }, 70);
+    }
+
+    // Frame processing: Draws camera + AI waste bounding boxes
+    async function processFrame() {
+      if (video.readyState === 4) {
+        const w = video.videoWidth || 640;
+        const h = video.videoHeight || 480;
+        if (canvas.width !== w || canvas.height !== h) {
+          canvas.width = w;
+          canvas.height = h;
+        }
+
+        ctx.drawImage(video, 0, 0, w, h);
+
+        if (aiModel) {
+          try {
+            const predictions = await aiModel.detect(video);
+            let topItem = null;
+
+            predictions.forEach(pred => {
+              const item = resolveWaste(pred.class);
+              if (!item || pred.score < 0.35) return;
+
+              const [bx, by, bw, bh] = pred.bbox;
+              const conf = Math.round(pred.score * 100);
+
+              if (!topItem || pred.score > topItem.score) {
+                topItem = { item, conf };
+              }
+
+              // Draw high-visibility box
+              ctx.strokeStyle = item.color;
+              ctx.lineWidth = 3;
+              ctx.strokeRect(bx, by, bw, bh);
+
+              // Corner accents
+              const clen = Math.min(18, bw / 4, bh / 4);
+              ctx.lineWidth = 5;
+              ctx.beginPath();
+              ctx.moveTo(bx, by + clen); ctx.lineTo(bx, by); ctx.lineTo(bx + clen, by);
+              ctx.moveTo(bx + bw - clen, by); ctx.lineTo(bx + bw, by); ctx.lineTo(bx + bw, by + clen);
+              ctx.moveTo(bx, by + bh - clen); ctx.lineTo(bx, by + bh); ctx.lineTo(bx + clen, by + bh);
+              ctx.moveTo(bx + bw - clen, by + bh); ctx.lineTo(bx + bw, by + bh); ctx.lineTo(bx + bw, by + bh - clen);
+              ctx.stroke();
+
+              // Badge
+              ctx.fillStyle = item.color;
+              const label = `${item.name} ${conf}%`;
+              ctx.font = "bold 13px Plus Jakarta Sans, sans-serif";
+              const textWidth = ctx.measureText(label).width;
+              const badgeY = Math.max(by - 26, 6);
+              ctx.fillRect(bx, badgeY, Math.max(textWidth + 14, 180), 22);
+
+              ctx.fillStyle = "#000000";
+              ctx.fillText(label, bx + 6, badgeY + 16);
+
+              // Sub pills
+              const subY = badgeY + 24;
+              ctx.fillStyle = item.recyclable ? "#10b981" : "#ef4444";
+              ctx.fillRect(bx, subY, 82, 16);
+              ctx.fillStyle = "#ffffff";
+              ctx.font = "bold 10px Plus Jakarta Sans, sans-serif";
+              ctx.fillText(item.recyclable ? "REC: YES" : "REC: NO", bx + 6, subY + 12);
+
+              ctx.fillStyle = item.biodegradable ? "#34d399" : "#64748b";
+              ctx.fillRect(bx + 86, subY, 82, 16);
+              ctx.fillStyle = "#ffffff";
+              ctx.fillText(item.biodegradable ? "BIO: YES" : "BIO: NO", bx + 92, subY + 12);
+            });
+
+            // Update on-screen banner & broadcast detection
+            if (topItem) {
+              bannerName.textContent = `${topItem.item.name} (${topItem.conf}%)`;
+              const recClass = topItem.item.recyclable ? 'tag-rec-yes' : 'tag-rec-no';
+              const recText = topItem.item.recyclable ? 'Recyclable: YES' : 'Non-Recyclable';
+              const bioClass = topItem.item.biodegradable ? 'tag-bio-yes' : 'tag-bio-no';
+              const bioText = topItem.item.biodegradable ? 'Bio: YES' : 'Non-Bio';
+
+              bannerTags.innerHTML = `
+                <span class="mini-tag ${recClass}">${recText}</span>
+                <span class="mini-tag ${bioClass}">${bioText}</span>
+              `;
+              bannerBin.textContent = `Disposal: ${topItem.item.bin}`;
+
+              // Send live detection to EcoWing dashboard (throttled to 1/sec)
+              const now = Date.now();
+              if (now - lastDetectionBroadcastTime > 1000) {
+                lastDetectionBroadcastTime = now;
+                const detEvent = {
+                  type: 'detection',
+                  item: topItem.item.name,
+                  material: topItem.item.category,
+                  confidence: topItem.conf,
+                  recyclable: topItem.item.recyclable,
+                  biodegradable: topItem.item.biodegradable,
+                  bin: topItem.item.bin
+                };
+
+                // Over WebRTC data channel
+                activeDataConns.forEach(c => {
+                  try { if (c.open) c.send(detEvent); } catch(e){}
+                });
+
+                // Over HTTP REST
+                fetch(`${ECOWING_TARGET}/api/drone/detection`, {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    drone_id: 'Phone Camera',
+                    class_name: topItem.item.name,
+                    confidence: topItem.conf,
+                    center: [320, 240]
+                  })
+                }).catch(() => {});
+              }
+            } else {
+              bannerName.textContent = "Scanning for Waste...";
+              bannerTags.innerHTML = "";
+              bannerBin.textContent = "Aim at bottles, cans, paper, cardboard, or food scrap";
+            }
+          } catch (e) {}
+        }
+      }
+      requestAnimationFrame(processFrame);
     }
 
     // Switch between Front & Rear Camera
@@ -488,17 +706,16 @@
       }
     });
 
-    // AMOLED Screen Off Mode (Turn entire screen 100% black)
+    // AMOLED Screen Off Mode
     btnScreenOff.addEventListener('click', () => {
       screenOffLayer.classList.add('active');
-      // Reset hint animation
       screenOffHint.style.animation = 'none';
-      screenOffHint.offsetHeight; // trigger reflow
+      screenOffHint.offsetHeight;
       screenOffHint.style.animation = 'fadeOutHint 4s forwards';
     });
 
-    // Double-tap to wake from Screen Off mode
-    screenOffLayer.addEventListener('click', (e) => {
+    // Double-tap to wake
+    screenOffLayer.addEventListener('click', () => {
       const now = Date.now();
       if (now - lastTap < 400) {
         screenOffLayer.classList.remove('active');
@@ -507,123 +724,21 @@
       }
     });
 
-    // Stream Toggle
+    // Pause/Resume Stream
     btnStream.addEventListener('click', () => {
-      setStreaming(!isStreaming);
-    });
-
-    function setStreaming(state) {
-      isStreaming = state;
-      if (isStreaming) {
+      isBroadcasting = !isBroadcasting;
+      if (isBroadcasting) {
         btnStream.classList.add('streaming');
         iconPlay.style.display = 'none';
         iconStop.style.display = 'block';
-        startFrameBroadcaster();
+        statusText.textContent = "BROADCASTING LIVE";
       } else {
         btnStream.classList.remove('streaming');
         iconPlay.style.display = 'block';
         iconStop.style.display = 'none';
-        stopFrameBroadcaster();
         statusText.textContent = "PAUSED";
       }
-    }
-
-    // Server Configuration
-    const btnConfigServer = document.getElementById('btn-config-server');
-    let customServer = localStorage.getItem('ecowing_server_url') || '';
-
-    btnConfigServer.addEventListener('click', () => {
-      const entered = prompt('Enter your AI Server IP or Tunnel URL (e.g. 192.168.31.44:5000 or your-tunnel.loca.lt):', customServer || window.location.host);
-      if (entered) {
-        customServer = entered.trim().replace(/^https?:\/\//, '').replace(/\/$/, '');
-        localStorage.setItem('ecowing_server_url', customServer);
-        if (ws) ws.close();
-        initWebSocket();
-      }
     });
-
-    function initWebSocket() {
-      const targetHost = customServer || window.location.host;
-      const isHttps = window.location.protocol === 'https:' || targetHost.includes('loca.lt') || targetHost.includes('ngrok') || targetHost.includes('trycloudflare');
-      const proto = isHttps ? 'wss:' : 'ws:';
-      const wsUrl = `${proto}//${targetHost}/ws/mobile_stream`;
-      
-      console.log('Connecting to WebSocket:', wsUrl);
-      ws = new WebSocket(wsUrl);
-
-      ws.onopen = () => {
-        statusText.textContent = "STREAMING LIVE";
-        statusPill.style.borderColor = "#10b981";
-      };
-
-      ws.onmessage = (event) => {
-        try {
-          const msg = JSON.parse(event.data);
-          if (msg.type === "detection_feedback") {
-            updateMobileHUD(msg.data);
-          }
-        } catch (e) {}
-      };
-
-      ws.onclose = () => {
-        statusText.textContent = "RECONNECTING...";
-        setTimeout(initWebSocket, 2000);
-      };
-
-      ws.onerror = () => {
-        statusText.textContent = "OFFLINE";
-      };
-    }
-
-    function startFrameBroadcaster() {
-      stopFrameBroadcaster();
-      canvas.width = 640;
-      canvas.height = 480;
-
-      streamInterval = setInterval(() => {
-        if (!isStreaming || !ws || ws.readyState !== WebSocket.OPEN) return;
-        if (video.videoWidth === 0) return;
-
-        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-        canvas.toBlob((blob) => {
-          if (blob && ws.readyState === WebSocket.OPEN) {
-            blob.arrayBuffer().then(buffer => {
-              ws.send(buffer);
-            });
-          }
-        }, 'image/jpeg', 0.72);
-      }, 50);
-    }
-
-    function stopFrameBroadcaster() {
-      if (streamInterval) {
-        clearInterval(streamInterval);
-        streamInterval = null;
-      }
-    }
-
-    function updateMobileHUD(data) {
-      if (!data || !data.items || data.items.length === 0) {
-        bannerName.textContent = "Scanning for Waste...";
-        bannerTags.innerHTML = "";
-        bannerBin.textContent = "Aim at bottles, cans, paper, cardboard, or food scrap";
-        return;
-      }
-
-      const topItem = data.items[0];
-      bannerName.textContent = `${topItem.name} (${topItem.confidence}%)`;
-
-      const recClass = topItem.recyclable ? 'tag-rec-yes' : 'tag-rec-no';
-      const recText = topItem.recyclable ? 'Recyclable: YES' : 'Non-Recyclable';
-      const bioClass = topItem.biodegradable ? 'tag-bio-yes' : 'tag-bio-no';
-      const bioText = topItem.biodegradable ? 'Bio: YES' : 'Non-Bio';
-
-      bannerTags.innerHTML = `
-        <span class="mini-tag ${recClass}">${recText}</span>
-        <span class="mini-tag ${bioClass}">${bioText}</span>
-      `;
-      bannerBin.textContent = `Disposal: ${topItem.bin}`;
-    }
   </script>
 </body>
 </html>
