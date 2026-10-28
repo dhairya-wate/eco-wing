@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>EcoWing | Waste Detection & Live Stream Center</title>
+  <link rel="stylesheet" href="/static/css/style.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+</head>
+<body>
+  <div class="app-container">
+    <!-- Header -->
+    <header class="app-header">
+      <div class="brand-group">
+        <div class="brand-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M11 20A7 7 0 0 1 9.8 6.1C15.5 5 17 4.48 19 2c1 2 2 4.18 2 8 0 5.5-4.78 10-10 10Z"/>
+            <path d="M2 21c0-3 1.85-5.36 5.08-6C9.5 14.52 12 13 13 12"/>
+          </svg>
+        </div>
+        <div>
+          <h1 class="brand-title">EcoWing <span>AI Detection</span></h1>
+          <p class="brand-subtitle">Automated Waste Sorting & Live Website Streaming</p>
+        </div>
+      </div>
+
+      <div class="header-badges">
+        <div class="badge status-live">
+          <span class="pulse-dot"></span> LIVE STREAMING
+        </div>
+        <div class="badge ip-badge" id="host-ip-badge">
+          IP: Detecting...
+        </div>
+      </div>
+    </header>
+
+    <!-- Metrics Row -->
+    <section class="metrics-grid">
+      <div class="metric-card total-card">
+        <div class="metric-icon">🗑️</div>
+        <div class="metric-info">
+          <span class="metric-label">Total Waste Detected</span>
+          <h2 class="metric-value" id="val-total">0</h2>
+        </div>
+      </div>
+
+      <div class="metric-card recyclable-card">
+        <div class="metric-icon">♻️</div>
+        <div class="metric-info">
+          <span class="metric-label">Recyclable Items</span>
+          <h2 class="metric-value" id="val-rec">0</h2>
+          <span class="metric-sub" id="sub-rec">0% of detected</span>
+        </div>
+      </div>
+
+      <div class="metric-card non-rec-card">
+        <div class="metric-icon">🚫</div>
+        <div class="metric-info">
+          <span class="metric-label">Non-Recyclable</span>
+          <h2 class="metric-value" id="val-non-rec">0</h2>
+        </div>
+      </div>
+
+      <div class="metric-card bio-card">
+        <div class="metric-icon">🌱</div>
+        <div class="metric-info">
+          <span class="metric-label">Biodegradable</span>
+          <h2 class="metric-value" id="val-bio">0</h2>
+        </div>
+      </div>
+
+      <div class="metric-card non-bio-card">
+        <div class="metric-icon">📦</div>
+        <div class="metric-info">
+          <span class="metric-label">Non-Biodegradable</span>
+          <h2 class="metric-value" id="val-non-bio">0</h2>
+        </div>
+      </div>
+    </section>
+
+    <!-- Main Workspace -->
+    <main class="main-layout">
+      <!-- Left Column: Video Stream & Controls -->
+      <div class="stream-panel">
+        <div class="panel-header">
+          <div class="panel-title">
+            <span>📹 Live Camera / Detection Stream</span>
+            <span class="source-tag" id="current-source-tag">Source: Camera 0</span>
+          </div>
+          <div class="stream-actions">
+            <button class="btn btn-secondary btn-sm" id="btn-toggle-overlay">
+              Toggle HUD
+            </button>
+            <button class="btn btn-secondary btn-sm" id="btn-fullscreen">
+              ⛶ Fullscreen
+            </button>
+          </div>
+        </div>
+
+        <div class="video-container" id="video-wrapper">
+          <img id="stream-img" src="/video_feed" alt="EcoWing Detection Live Stream" />
+          <div class="stream-overlay-tag">STREAM ACTIVE</div>
+        </div>
+
+        <!-- Controls Row -->
+        <div class="controls-card">
+          <div class="control-row">
+            <div class="control-col">
+              <label for="conf-slider">Confidence Threshold: <span id="conf-val">35%</span></label>
+              <input type="range" id="conf-slider" min="15" max="85" value="35" step="5">
+            </div>
+
+            <div class="control-col">
+              <label for="source-select">Video Input Source</label>
+              <div class="input-with-btn">
+                <select id="source-select">
+                  <option value="0">Default Webcam (Index 0)</option>
+                  <option value="1">Secondary Webcam (Index 1)</option>
+                  <option value="simulator">Demo Simulator (Sample Waste Loop)</option>
+                  <option value="custom">Custom RTSP / Video File...</option>
+                </select>
+                <button class="btn btn-primary btn-sm" id="btn-apply-source">Switch</button>
+              </div>
+            </div>
+          </div>
+          
+          <div id="custom-source-row" class="custom-source-row hidden">
+            <input type="text" id="custom-source-input" placeholder="e.g. rtsp://192.168.1.50:554/ch0 or C:\path\test.mp4" />
+          </div>
+        </div>
+      </div>
+
+      <!-- Right Column: Integration & Active Objects -->
+      <div class="sidebar-panel">
+        <!-- Mobile Stream Card -->
+        <div class="connect-card mobile-card">
+          <div class="connect-header">
+            <div class="connect-title-group">
+              <span class="connect-icon">📱</span>
+              <div>
+                <h3>Stream From Mobile Phone</h3>
+                <p>Use your phone camera as a wireless AI waste scanner</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="mobile-connect-box">
+            <div class="endpoint-label">OPEN ON YOUR PHONE BROWSER:</div>
+            <div class="copy-input-group">
+              <input type="text" readonly id="input-mobile-url" value="http://.../mobile">
+              <button class="btn btn-copy" onclick="copyText('input-mobile-url')">Copy URL</button>
+            </div>
+            <div class="qr-container">
+              <img id="qr-code-img" src="" alt="Scan QR with Phone" class="qr-img hidden" />
+              <div class="qr-hint">Scan with your phone camera or visit link on same Wi-Fi</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Website Connection Card (Top Priority) -->
+        <div class="connect-card">
+          <div class="connect-header">
+            <div class="connect-title-group">
+              <span class="connect-icon">🌐</span>
+              <div>
+                <h3>Connect to EcoWing Website</h3>
+                <p>Embed this live stream into your website with your IP address</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="endpoint-box">
+            <div class="endpoint-label">LIVE STREAM LINK (MJPEG)</div>
+            <div class="copy-input-group">
+              <input type="text" readonly id="input-stream-url" value="http://.../video_feed">
+              <button class="btn btn-copy" onclick="copyText('input-stream-url')">Copy Link</button>
+            </div>
+          </div>
+
+          <div class="endpoint-box">
+            <div class="endpoint-label">REST API (JSON TELEMETRY)</div>
+            <div class="copy-input-group">
+              <input type="text" readonly id="input-api-url" value="http://.../api/detections">
+              <button class="btn btn-copy" onclick="copyText('input-api-url')">Copy API</button>
+            </div>
+          </div>
+
+          <!-- Snippet Tabs -->
+          <div class="tabs-header">
+            <button class="tab-btn active" data-tab="tab-html">HTML &lt;img&gt;</button>
+            <button class="tab-btn" data-tab="tab-react">React / Next.js</button>
+            <button class="tab-btn" data-tab="tab-js">Fetch API (JS)</button>
+          </div>
+
+          <div class="tab-content active" id="tab-html">
+            <pre><code id="code-html">&lt;img 
+  src="http://YOUR_IP:5000/video_feed" 
+  alt="EcoWing Waste Detection Stream" 
+  style="width: 100%; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.15);" 
+/&gt;</code></pre>
+            <button class="btn btn-secondary btn-xs" onclick="copyText('code-html', true)">Copy Snippet</button>
+          </div>
+
+          <div class="tab-content" id="tab-react">
+            <pre><code id="code-react">&lt;img 
+  src="http://YOUR_IP:5000/video_feed" 
+  alt="EcoWing Stream" 
+  className="w-full rounded-2xl border border-emerald-500/20 shadow-xl"
+/&gt;</code></pre>
+            <button class="btn btn-secondary btn-xs" onclick="copyText('code-react', true)">Copy Snippet</button>
+          </div>
+
+          <div class="tab-content" id="tab-js">
+            <pre><code id="code-js">// Fetch live detection results on EcoWing website:
+async function getWasteTelemetry() {
+  const res = await fetch("http://YOUR_IP:5000/api/detections");
+  const data = await res.json();
+  console.log(data.data.items);
+}</code></pre>
+            <button class="btn btn-secondary btn-xs" onclick="copyText('code-js', true)">Copy Snippet</button>
+          </div>
+        </div>
+
+        <!-- Real-time Detected Items Feed -->
+        <div class="items-card">
+          <div class="items-header">
+            <h3>Current Waste In View</h3>
+            <span class="count-pill" id="live-pill-count">0 Detected</span>
+          </div>
+
+          <div class="items-list" id="detected-items-container">
+            <div class="empty-state">
+              <span class="empty-icon">🔍</span>
+              <p>No waste items in view</p>
+              <small>Point camera at paper, glass, can, cardboard, or food waste</small>
+            </div>
+          </div>
+        </div>
+
+        <!-- Instant Image Test / Dropzone -->
+        <div class="upload-card">
+          <div class="upload-header">
+            <h4>Snapshot / Image File Test</h4>
+          </div>
+          <div class="dropzone" id="dropzone">
+            <input type="file" id="file-input" accept="image/*" style="display: none;" />
+            <span class="upload-icon">📁</span>
+            <p>Drop waste photo here or <strong>Click to Upload</strong></p>
+            <small>Supports Paper, Glass, Can, Cardboard, Plastic, etc.</small>
+          </div>
+          <div id="upload-result" class="upload-result hidden"></div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <script src="/static/js/main.js"></script>
+</body>
+</html>
+

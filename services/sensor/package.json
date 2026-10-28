@@ -1,0 +1,18 @@
+{
+  "name": "ecowing-detection-system",
+  "version": "1.0.0",
+  "description": "EcoWing AI Waste Sorting, Classification and Live Stream Center",
+  "main": "run.py",
+  "scripts": {
+    "start": "python run.py"
+  },
+  "keywords": [
+    "ecowing",
+    "yolo",
+    "waste-classification",
+    "live-stream",
+    "ai"
+  ],
+  "author": "EcoWing Team",
+  "license": "MIT"
+}

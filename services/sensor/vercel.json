@@ -1,0 +1,18 @@
+{
+  "version": 2,
+  "cleanUrls": true,
+  "routes": [
+    {
+      "src": "/mobile",
+      "dest": "/templates/mobile.html"
+    },
+    {
+      "src": "/static/(.*)",
+      "dest": "/static/$1"
+    },
+    {
+      "src": "/(.*)",
+      "dest": "/templates/index.html"
+    }
+  ]
+}
