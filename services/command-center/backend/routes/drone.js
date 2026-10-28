@@ -1,10 +1,14 @@
 const express = require('express');
 const router = express.Router();
+const mongoose = require('mongoose');
 const Detection = require('../models/Detection');
 const Drone = require('../models/Drone');
 const Telemetry = require('../models/Telemetry');
 const { broadcastFrame } = require('../videoStream');
 const { computeDashboardStats } = require('./api');
+
+// In-memory drone state when MongoDB is offline
+const memoryDrones = new Map();
 
 let nextEventId = 1;
 
@@ -48,9 +52,29 @@ router.get('/info', (req, res) => {
  */
 router.post('/connect', async (req, res) => {
   try {
-    const { drone_id, name } = req.body;
+    const { drone_id, name, stream_url } = req.body;
     if (!drone_id) {
       return res.status(400).json({ error: 'drone_id is required' });
+    }
+
+    if (mongoose.connection.readyState !== 1) {
+      const fallbackDrone = {
+        drone_id,
+        name: name || drone_id,
+        status: 'Flying',
+        is_connected: true,
+        is_active: true,
+        stream_url: stream_url || '',
+        last_seen: new Date(),
+        telemetry: {
+          status: 'Flying',
+          battery_pct: 98,
+          altitude_m: 14.5,
+          speed_mps: 4.5
+        }
+      };
+      memoryDrones.set(drone_id, fallbackDrone);
+      return res.json({ success: true, drone: fallbackDrone, mode: 'memory' });
     }
 
     // Check if this is the only drone, if so make it active
