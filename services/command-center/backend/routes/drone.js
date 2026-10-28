@@ -122,6 +122,11 @@ router.post('/disconnect', async (req, res) => {
       return res.status(400).json({ error: 'drone_id is required' });
     }
 
+    if (mongoose.connection.readyState !== 1) {
+      memoryDrones.delete(drone_id);
+      return res.json({ success: true, message: `Drone ${drone_id} disconnected (memory mode)` });
+    }
+
     const drone = await Drone.findOneAndUpdate(
       { drone_id },
       { is_connected: false, status: 'Idle', is_active: false },
@@ -149,6 +154,17 @@ router.post('/telemetry', async (req, res) => {
   try {
     const data = req.body;
     const drone_id = data.drone_id || 'Drone-01';
+
+    if (mongoose.connection.readyState !== 1) {
+      const io = req.app.get('io');
+      if (io) {
+        io.emit('telemetry_update', {
+          active_drone: drone_id,
+          telemetry: data
+        });
+      }
+      return res.json({ success: true, message: 'Telemetry broadcast (memory mode)' });
+    }
 
     // 1. Save telemetry history snapshot to MongoDB
     const telemetryRecord = new Telemetry({
@@ -243,7 +259,7 @@ router.post('/detection', async (req, res) => {
     const { inferMaterialType } = require('../models/Detection');
     const material_type = req.body.material_type || inferMaterialType(class_name);
 
-    const detection = new Detection({
+    const detObj = {
       event_id,
       drone_id: drone_id || 'Drone-01',
       class_name,
@@ -251,8 +267,17 @@ router.post('/detection', async (req, res) => {
       confidence: Number(confidence),
       center: Array.isArray(center) ? center : [0, 0],
       timestamp: timestamp || new Date().toISOString().replace('T', ' ').substring(0, 19)
-    });
+    };
 
+    if (mongoose.connection.readyState !== 1) {
+      const io = req.app.get('io');
+      if (io) {
+        io.emit('new_detection', detObj);
+      }
+      return res.status(201).json({ success: true, detection: detObj, mode: 'memory' });
+    }
+
+    const detection = new Detection(detObj);
     await detection.save();
 
     // Broadcast new detection and updated stats via Socket.IO

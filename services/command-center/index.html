@@ -1747,6 +1747,12 @@ html:not(.authed) body{overflow:hidden}
         <div class="fc-tb" id="fcTb">
           <button id="tbFs" title="Fullscreen" aria-label="Fullscreen"><i class="ti ti-arrows-maximize"></i></button>
         </div>
+                <!-- WebRTC live direct video stream from Phone -->
+        <video id="liveFeedVideo"
+               autoplay
+               playsinline
+               muted
+               style="width:100%;height:100%;object-fit:cover;display:none;"></video>
         <!-- MJPEG live annotated frame -->
         <img id="liveFeedImg"
              src="/video_feed"
@@ -1757,9 +1763,16 @@ html:not(.authed) body{overflow:hidden}
              onload="this.style.display='block';document.getElementById('feedOffline').style.display='none';">
         <!-- Fallback shown when stream is offline -->
         <div id="feedOffline" class="feed-placeholder">
-          <i class="ti ti-video-off"></i>
-          <div>Camera offline</div>
-          <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">Start the detector to see the live feed</div>
+          <div style="width:48px;height:48px;border-radius:50%;background:rgba(16,185,129,0.15);display:flex;align-items:center;justify-content:center;margin-bottom:10px;color:var(--primary);font-size:24px;">
+            <i class="ti ti-device-mobile"></i>
+          </div>
+          <div style="font-weight:700;font-size:15px;color:var(--text-primary)">Ready for Phone Camera Stream</div>
+          <div style="font-size:12px;color:var(--text-secondary);max-width:300px;text-align:center;margin:6px 0 14px">
+            Open the Detection scanner on your phone to stream live AI waste detection automatically.
+          </div>
+          <a href="https://detection-e454.vercel.app/mobile.html" target="_blank" class="ctrl-btn success" style="text-decoration:none;font-size:12px;padding:8px 16px;display:inline-flex;align-items:center;gap:6px">
+            <i class="ti ti-external-link"></i> Open Phone Scanner
+          </a>
         </div>
       </div>
 
@@ -2249,6 +2262,13 @@ html:not(.authed) body{overflow:hidden}
     </div>
 
     <div id="adPaneForm" class="ad-form">
+    <div style="background:rgba(16,185,129,0.1);border:1px solid rgba(16,185,129,0.3);border-radius:8px;padding:12px 14px;margin-bottom:12px;display:flex;align-items:center;justify-content:space-between">
+      <div>
+        <div style="font-weight:700;font-size:13px;color:var(--text-primary)"><i class="ti ti-device-mobile" style="color:var(--primary);margin-right:4px"></i> Phone Camera Auto-Connect</div>
+        <div style="font-size:11px;color:var(--text-secondary)">Direct WebRTC stream from your phone &mdash; zero config required!</div>
+      </div>
+      <button type="button" id="btnPhoneAutoConnect" class="lb-btn primary" style="font-size:12px;padding:6px 14px;display:inline-flex;align-items:center;gap:4px"><i class="ti ti-bolt"></i> Connect Phone</button>
+    </div>
       <div><label for="adName">Drone identifier / callsign</label><input class="mp-in" id="adName" placeholder="e.g. EcoWing-01" maxlength="24" autocomplete="off"></div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
         <div><label for="adType">Protocol link</label><select class="mp-in" id="adType"><option value="wifi">HTTP REST / Wi-Fi</option><option value="socket">WebSocket / Socket.IO</option><option value="mavlink">MAVLink (UDP / TCP)</option><option value="rtsp">Video Stream (RTSP / HTTP)</option><option value="serial">USB / Serial</option></select></div>
@@ -2307,6 +2327,7 @@ html:not(.authed) body{overflow:hidden}
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.min.js"></script>
 <style>
 .leaflet-container { z-index: 1; }
@@ -2700,7 +2721,152 @@ function switchTab(button, tabId) {
 }
 
 // ─── Socket.IO live connection ────────────────────────────────────────────────
-const socket = (typeof io === 'function') ? io(API_BASE || undefined, { reconnectionDelayMax: 10000 }) : { on() {}, connected: false };
+
+  // ─── Zero-Config WebRTC Phone Live Video Receiver ──────────────────
+  (function setupPhoneReceiver() {
+    let peerRec = null;
+    let phoneCall = null;
+    let phoneConnected = false;
+
+    function connectToPhone() {
+      if (phoneConnected || typeof Peer === 'undefined') return;
+
+      if (!peerRec || peerRec.destroyed) {
+        const myId = 'ecowing-viewer-' + Math.floor(Math.random() * 1000000);
+        peerRec = new Peer(myId, {
+          debug: 1,
+          config: {
+            iceServers: [
+              { urls: 'stun:stun.l.google.com:19302' },
+              { urls: 'stun:global.stun.twilio.com:3478' }
+            ]
+          }
+        });
+
+        peerRec.on('open', () => {
+          callPhoneBroadcaster();
+        });
+
+        peerRec.on('error', () => {
+          phoneConnected = false;
+        });
+      } else {
+        callPhoneBroadcaster();
+      }
+    }
+
+    function callPhoneBroadcaster() {
+      if (!peerRec || peerRec.destroyed || phoneConnected) return;
+
+      let dummyStream = null;
+      try {
+        const dc = document.createElement('canvas');
+        dc.width = 2; dc.height = 2;
+        dummyStream = dc.captureStream ? dc.captureStream(1) : null;
+      } catch (e) {}
+
+      if (!dummyStream) return;
+
+      try {
+        const call = peerRec.call('ecowing-live-drone', dummyStream);
+        if (!call) return;
+
+        call.on('stream', remoteStream => {
+          phoneConnected = true;
+          phoneCall = call;
+
+          const vid = document.getElementById('liveFeedVideo');
+          const img = document.getElementById('liveFeedImg');
+          const off = document.getElementById('feedOffline');
+          if (vid) {
+            vid.srcObject = remoteStream;
+            vid.style.display = 'block';
+            vid.play().catch(() => {});
+            if (img) img.style.display = 'none';
+            if (off) off.style.display = 'none';
+
+            const l = document.getElementById('liveLabel');
+            const d = document.getElementById('liveDot');
+            if (l) l.textContent = 'PHONE AI LIVE';
+            if (d) d.style.background = 'var(--success)';
+
+            // Auto-register Phone Drone in fleet list
+            if (typeof D !== 'undefined') {
+              const phoneDroneIdx = D.findIndex(x => x.n === 'Phone Camera');
+              if (phoneDroneIdx === -1) {
+                D.unshift({ n: 'Phone Camera', ms: 'AI Waste Scanning', addr: 'WebRTC Direct', feed: 'webrtc', s: 'flying', bat: 100, alt: 1.5, spd: 0 });
+                cur = 0;
+              } else {
+                cur = phoneDroneIdx;
+                D[cur].s = 'flying';
+              }
+              if (typeof render === 'function') render();
+            }
+
+            if (typeof toast === 'function') {
+              toast('Phone Camera Connected! Live streaming AI detections.', 'ok', 'ti-device-mobile');
+            }
+          }
+        });
+
+        call.on('close', () => {
+          phoneConnected = false;
+          const vid = document.getElementById('liveFeedVideo');
+          if (vid) vid.style.display = 'none';
+          const off = document.getElementById('feedOffline');
+          if (off) off.style.display = 'flex';
+          const l = document.getElementById('liveLabel');
+          if (l) l.textContent = 'CONNECTING';
+        });
+
+        call.on('error', () => {
+          phoneConnected = false;
+        });
+
+        // Data connection for real-time detections
+        const conn = peerRec.connect('ecowing-live-drone');
+        if (conn) {
+          conn.on('data', data => {
+            if (data && data.type === 'detection' && typeof prependRow === 'function') {
+              prependRow({
+                event_id: Math.floor(Math.random() * 90000) + 10000,
+                drone_id: 'Phone Camera',
+                class_name: data.item,
+                material_type: data.material,
+                confidence: data.confidence,
+                timestamp: new Date().toLocaleTimeString()
+              }, true);
+              const box = document.getElementById('liveFeedBox');
+              if (box) {
+                box.style.boxShadow = '0 0 0 3px var(--success)';
+                setTimeout(() => box.style.boxShadow = '', 600);
+              }
+            }
+          });
+        }
+      } catch (err) {}
+    }
+
+    // Auto-poll every 3s
+    setInterval(connectToPhone, 3000);
+    setTimeout(connectToPhone, 1200);
+
+    // One-click connect button in modal
+    document.addEventListener('DOMContentLoaded', () => {
+      const btn = document.getElementById('btnPhoneAutoConnect');
+      if (btn) {
+        btn.onclick = () => {
+          phoneConnected = false;
+          connectToPhone();
+          const adModal = document.getElementById('adModal');
+          if (adModal) adModal.classList.remove('open');
+          if (typeof toast === 'function') toast('Connecting to phone camera...', 'ok', 'ti-bolt');
+        };
+      }
+    });
+  })();
+
+  const socket = (typeof io === 'function') ? io(API_BASE || undefined, { reconnectionDelayMax: 10000 }) : { on() {}, connected: false };
 if (typeof io !== 'function') console.warn('socket.io failed to load: live updates disabled');
 if (API_BASE) { const _im = document.getElementById('liveFeedImg'); if (_im) _im.src = API_BASE + '/video_feed'; }
 function escHtml(v) { return String(v == null ? '' : v).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
