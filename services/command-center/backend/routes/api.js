@@ -5,6 +5,7 @@ const Detection = require('../models/Detection');
 const Drone = require('../models/Drone');
 const Telemetry = require('../models/Telemetry');
 const { getStreamStats } = require('../videoStream');
+const detectionStore = require('../detectionStore');
 
 // Preset colors for site analysis charts
 const CLASS_COLORS = [
@@ -17,49 +18,51 @@ const CLASS_COLORS = [
  */
 async function computeDashboardStats() {
   const streamStats = getStreamStats();
+  const fallbackStats = detectionStore.getStats();
 
-  if (mongoose.connection.readyState !== 1) {
-    return {
-      total_unique: 0,
-      active_tracks: 0,
-      fps: streamStats.fps,
-      running: false,
-      class_counts: {},
-      material_counts: { recyclable: 0, biodegradable: 0, non_recyclable: 0 },
-      telemetry: null,
-      all_drones: {}
-    };
+  let totalUnique = fallbackStats.total_unique;
+  let class_counts = { ...fallbackStats.class_counts };
+  let material_counts = { ...fallbackStats.material_counts };
+  let activeDroneDoc = null;
+  let allDronesList = [];
+
+  if (mongoose.connection.readyState === 1) {
+    try {
+      const [mTotal, classAgg, materialAgg, aDrone, allDrones] = await Promise.all([
+        Detection.countDocuments(),
+        Detection.aggregate([
+          { $group: { _id: '$class_name', count: { $sum: 1 } } },
+          { $sort: { count: -1 } }
+        ]),
+        Detection.aggregate([
+          { $group: { _id: '$material_type', count: { $sum: 1 } } }
+        ]),
+        Drone.findOne({ is_active: true }),
+        Drone.find()
+      ]);
+
+      activeDroneDoc = aDrone;
+      allDronesList = allDrones || [];
+
+      if (mTotal > 0) {
+        totalUnique = mTotal;
+        class_counts = {};
+        classAgg.forEach(item => {
+          class_counts[item._id] = item.count;
+        });
+
+        material_counts = { recyclable: 0, biodegradable: 0, non_recyclable: 0 };
+        materialAgg.forEach(m => {
+          const k = String(m._id || '').toLowerCase();
+          if (k.includes('recyclable') && !k.includes('non')) material_counts.recyclable += m.count;
+          else if (k.includes('bio')) material_counts.biodegradable += m.count;
+          else material_counts.non_recyclable += m.count;
+        });
+      }
+    } catch (e) {
+      console.warn('[MongoDB] Query warning in computeDashboardStats:', e.message);
+    }
   }
-
-  const [totalUnique, classAgg, materialAgg, activeDroneDoc, allDronesList] = await Promise.all([
-    Detection.countDocuments(),
-    Detection.aggregate([
-      { $group: { _id: '$class_name', count: { $sum: 1 } } },
-      { $sort: { count: -1 } }
-    ]),
-    Detection.aggregate([
-      { $group: { _id: '$material_type', count: { $sum: 1 } } }
-    ]),
-    Drone.findOne({ is_active: true }),
-    Drone.find()
-  ]);
-
-  const class_counts = {};
-  classAgg.forEach(item => {
-    class_counts[item._id] = item.count;
-  });
-
-  const material_counts = {
-    recyclable: 0,
-    biodegradable: 0,
-    non_recyclable: 0
-  };
-  materialAgg.forEach(m => {
-    const k = String(m._id || '').toLowerCase();
-    if (k.includes('recyclable') && !k.includes('non')) material_counts.recyclable += m.count;
-    else if (k.includes('bio')) material_counts.biodegradable += m.count;
-    else material_counts.non_recyclable += m.count;
-  });
 
   const all_drones = {};
   allDronesList.forEach(d => {
@@ -103,24 +106,31 @@ router.get('/stats', async (req, res) => {
  */
 router.get('/events', async (req, res) => {
   try {
-    if (mongoose.connection.readyState !== 1) {
-      return res.json([]);
+    if (mongoose.connection.readyState === 1) {
+      try {
+        const docs = await Detection.find()
+          .sort({ createdAt: -1 })
+          .limit(200);
+
+        if (docs && docs.length > 0) {
+          const { inferMaterialType } = require('../models/Detection');
+          const events = docs.map(d => ({
+            event_id: d.event_id,
+            class_name: d.class_name,
+            material_type: d.material_type || inferMaterialType(d.class_name),
+            confidence: d.confidence,
+            center: d.center,
+            timestamp: d.timestamp
+          }));
+          return res.json(events);
+        }
+      } catch (e) {
+        console.warn('[MongoDB] Query warning in /api/events:', e.message);
+      }
     }
-    const docs = await Detection.find()
-      .sort({ createdAt: -1 })
-      .limit(200);
 
-    const { inferMaterialType } = require('../models/Detection');
-    const events = docs.map(d => ({
-      event_id: d.event_id,
-      class_name: d.class_name,
-      material_type: d.material_type || inferMaterialType(d.class_name),
-      confidence: d.confidence,
-      center: d.center,
-      timestamp: d.timestamp
-    }));
-
-    res.json(events);
+    // Fallback: persistent store events
+    res.json(detectionStore.getEvents(200));
   } catch (err) {
     console.error('Error fetching /api/events:', err);
     res.status(500).json({ error: 'Failed to fetch events' });
@@ -133,7 +143,15 @@ router.get('/events', async (req, res) => {
  */
 router.post('/feed/clear', async (req, res) => {
   try {
-    await Detection.deleteMany({});
+    detectionStore.clear();
+
+    if (mongoose.connection.readyState === 1) {
+      try {
+        await Detection.deleteMany({});
+      } catch (e) {
+        console.warn('[MongoDB] Delete warning:', e.message);
+      }
+    }
     
     // Broadcast cleared stats to all web clients
     const io = req.app.get('io');
@@ -142,7 +160,7 @@ router.post('/feed/clear', async (req, res) => {
       io.emit('stats_update', stats);
     }
 
-    res.json({ success: true, message: 'Detection feed cleared' });
+    res.json({ success: true, message: 'Detection feed cleared across all database stores' });
   } catch (err) {
     console.error('Error clearing feed:', err);
     res.status(500).json({ error: 'Failed to clear feed' });
@@ -155,50 +173,49 @@ router.post('/feed/clear', async (req, res) => {
  */
 router.get('/chart_data', async (req, res) => {
   try {
-    if (mongoose.connection.readyState !== 1) {
-      return res.json({
-        labels: [],
-        data: [],
-        colors: [],
-        eco: {
-          labels: ['Recyclable', 'Biodegradable', 'Non-Recyclable'],
-          data: [0, 0, 0],
-          colors: ['#10b981', '#84cc16', '#f59e0b']
+    if (mongoose.connection.readyState === 1) {
+      try {
+        const [agg, matAgg] = await Promise.all([
+          Detection.aggregate([
+            { $group: { _id: '$class_name', count: { $sum: 1 } } },
+            { $sort: { count: -1 } }
+          ]),
+          Detection.aggregate([
+            { $group: { _id: '$material_type', count: { $sum: 1 } } }
+          ])
+        ]);
+
+        if (agg && agg.length > 0) {
+          const labels = agg.map(a => a._id);
+          const data = agg.map(a => a.count);
+          const colors = labels.map((_, i) => CLASS_COLORS[i % CLASS_COLORS.length]);
+
+          let rec = 0, bio = 0, other = 0;
+          matAgg.forEach(m => {
+            const k = String(m._id || '').toLowerCase();
+            if (k.includes('recyclable') && !k.includes('non')) rec += m.count;
+            else if (k.includes('bio')) bio += m.count;
+            else other += m.count;
+          });
+
+          return res.json({
+            labels,
+            data,
+            colors,
+            eco: {
+              labels: ['Recyclable', 'Biodegradable', 'Non-Recyclable'],
+              data: [rec, bio, other],
+              colors: ['#10b981', '#84cc16', '#f59e0b']
+            }
+          });
         }
-      });
-    }
-    const [agg, matAgg] = await Promise.all([
-      Detection.aggregate([
-        { $group: { _id: '$class_name', count: { $sum: 1 } } },
-        { $sort: { count: -1 } }
-      ]),
-      Detection.aggregate([
-        { $group: { _id: '$material_type', count: { $sum: 1 } } }
-      ])
-    ]);
-
-    const labels = agg.map(a => a._id);
-    const data = agg.map(a => a.count);
-    const colors = labels.map((_, i) => CLASS_COLORS[i % CLASS_COLORS.length]);
-
-    let rec = 0, bio = 0, other = 0;
-    matAgg.forEach(m => {
-      const k = String(m._id || '').toLowerCase();
-      if (k.includes('recyclable') && !k.includes('non')) rec += m.count;
-      else if (k.includes('bio')) bio += m.count;
-      else other += m.count;
-    });
-
-    res.json({
-      labels,
-      data,
-      colors,
-      eco: {
-        labels: ['Recyclable', 'Biodegradable', 'Non-Recyclable'],
-        data: [rec, bio, other],
-        colors: ['#10b981', '#84cc16', '#f59e0b']
+      } catch (e) {
+        console.warn('[MongoDB] Query warning in /api/chart_data:', e.message);
       }
-    });
+    }
+
+    // Fallback: chart data calculated from persistent store
+    res.json(detectionStore.getChartData());
   } catch (err) {
     console.error('Error fetching /api/chart_data:', err);
     res.status(500).json({ error: 'Failed to fetch chart data' });

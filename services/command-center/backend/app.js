@@ -1,12 +1,22 @@
+const fs = require('fs');
 const path = require('path');
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
-require('dotenv').config();
+
+// Locate and load .env file from either backend/.env or root .env
+const envPaths = [path.join(__dirname, '.env'), path.join(__dirname, '..', '.env')];
+for (const p of envPaths) {
+  if (fs.existsSync(p)) {
+    require('dotenv').config({ path: p });
+    break;
+  }
+}
 
 const { router: apiRouter } = require('./routes/api');
 const droneRouter = require('./routes/drone');
 const { handleClient } = require('./videoStream');
+const detectionStore = require('./detectionStore');
 
 const app = express();
 
@@ -24,7 +34,8 @@ app.use(express.json({ limit: '20mb' }));
 app.use(express.urlencoded({ extended: true, limit: '20mb' }));
 
 // MongoDB Connection with auto-reconnect & serverless caching
-const MONGO_URI = process.env.MONGO_URI || process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/ecowing';
+const ATLAS_URI = 'mongodb+srv://ecowing:ecowing-123@cluster0.nceyzqa.mongodb.net/ecowing?compressors=zlib&retryWrites=true&w=majority';
+const MONGO_URI = process.env.MONGO_URI || process.env.MONGODB_URI || ATLAS_URI;
 const safeLogUri = MONGO_URI.replace(/:([^:@]+)@/, ':****@');
 
 let isConnecting = false;
@@ -33,11 +44,12 @@ async function connectMongo() {
   isConnecting = true;
   try {
     await mongoose.connect(MONGO_URI, {
-      serverSelectionTimeoutMS: 8000
+      serverSelectionTimeoutMS: 5000,
+      connectTimeoutMS: 5000
     });
     console.log('[MongoDB] Connected successfully to database');
   } catch (err) {
-    console.warn(`[MongoDB] Connection error: ${err.message}`);
+    console.warn(`[MongoDB] Connection notice (${safeLogUri}): ${err.message}`);
   } finally {
     isConnecting = false;
   }
@@ -46,10 +58,10 @@ async function connectMongo() {
 // Initial connection attempt
 connectMongo();
 
-// Serverless middleware: ensure DB connection is active before processing API requests
+// Serverless middleware: attempt DB connection before processing API requests
 app.use(async (req, res, next) => {
   if (req.path.startsWith('/api') && mongoose.connection.readyState !== 1) {
-    await connectMongo();
+    connectMongo().catch(() => {});
   }
   next();
 });
@@ -57,10 +69,13 @@ app.use(async (req, res, next) => {
 // Health check endpoint
 app.get('/health', (req, res) => {
   const isMongoConnected = mongoose.connection.readyState === 1;
+  const stats = detectionStore.getStats();
   res.json({
     status: 'ok',
     service: 'ecowing-backend',
     mongodb: isMongoConnected ? 'connected' : 'disconnected',
+    database_mode: isMongoConnected ? 'mongodb_atlas' : 'persistent_store',
+    total_detections_saved: stats.total_unique,
     timestamp: new Date()
   });
 });

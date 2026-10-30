@@ -2828,19 +2828,46 @@ function switchTab(button, tabId) {
         if (conn) {
           conn.on('data', data => {
             if (data && data.type === 'detection' && typeof prependRow === 'function') {
-              prependRow({
-                event_id: Math.floor(Math.random() * 90000) + 10000,
+              const confNorm = (Number(data.confidence) > 1) ? Number(data.confidence) / 100 : Number(data.confidence) || 0.85;
+              const evData = {
+                event_id: data.event_id || Math.floor(Math.random() * 90000) + 10000,
                 drone_id: 'Phone Camera',
-                class_name: data.item,
-                material_type: data.material,
-                confidence: data.confidence,
+                class_name: data.item || 'Waste Item',
+                material_type: data.material_type || data.material || 'Recyclable',
+                confidence: confNorm,
+                center: [320, 240],
                 timestamp: new Date().toLocaleTimeString()
-              }, true);
+              };
+
+              prependRow(evData, true);
               const box = document.getElementById('liveFeedBox');
               if (box) {
                 box.style.boxShadow = '0 0 0 3px var(--success)';
                 setTimeout(() => box.style.boxShadow = '', 600);
               }
+
+              // Persist directly into EcoWing backend database
+              fetch((typeof API_BASE !== 'undefined' ? API_BASE : '') + '/api/drone/detection', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  drone_id: 'Phone Camera',
+                  class_name: evData.class_name,
+                  material_type: evData.material_type,
+                  confidence: evData.confidence,
+                  center: evData.center
+                })
+              })
+              .then(r => r.json())
+              .then(() => {
+                if (typeof updateAllStats === 'function') {
+                  fetch((typeof API_BASE !== 'undefined' ? API_BASE : '') + '/api/stats')
+                    .then(r => r.json())
+                    .then(updateAllStats)
+                    .catch(() => {});
+                }
+              })
+              .catch(() => {});
             }
           });
         }

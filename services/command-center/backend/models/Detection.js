@@ -34,6 +34,10 @@ const detectionSchema = new mongoose.Schema(
     material_type: {
       type: String,
       enum: ['Recyclable', 'Biodegradable', 'Non-Recyclable'],
+      set: function (v) {
+        if (['Recyclable', 'Biodegradable', 'Non-Recyclable'].includes(v)) return v;
+        return inferMaterialType(this.class_name || v);
+      },
       default: function () {
         return inferMaterialType(this.class_name);
       },
@@ -42,6 +46,10 @@ const detectionSchema = new mongoose.Schema(
     confidence: {
       type: Number,
       required: true,
+      set: function (v) {
+        const n = Number(v) || 0;
+        return n > 1 ? Number((n / 100).toFixed(2)) : Number(n.toFixed(2));
+      },
       min: 0,
       max: 1
     },

@@ -6,6 +6,7 @@ const Drone = require('../models/Drone');
 const Telemetry = require('../models/Telemetry');
 const { broadcastFrame } = require('../videoStream');
 const { computeDashboardStats } = require('./api');
+const detectionStore = require('../detectionStore');
 
 // In-memory drone state when MongoDB is offline
 const memoryDrones = new Map();
@@ -249,50 +250,50 @@ router.post('/telemetry', async (req, res) => {
  */
 router.post('/detection', async (req, res) => {
   try {
-    const { drone_id, class_name, confidence, center, timestamp } = req.body;
-    if (!class_name || confidence == null || !center) {
-      return res.status(400).json({ error: 'class_name, confidence, and center [x, y] are required' });
+    const { drone_id, class_name, center, timestamp } = req.body;
+    if (!class_name) {
+      return res.status(400).json({ error: 'class_name is required' });
     }
 
-    const event_id = req.body.event_id || nextEventId++;
-
-    const { inferMaterialType } = require('../models/Detection');
-    const material_type = req.body.material_type || inferMaterialType(class_name);
-
-    const detObj = {
-      event_id,
+    // 1. Always save into persistent DetectionStore (prevents data loss when Mongo is offline)
+    const detObj = detectionStore.addDetection({
+      event_id: req.body.event_id,
       drone_id: drone_id || 'Drone-01',
       class_name,
-      material_type,
-      confidence: Number(confidence),
-      center: Array.isArray(center) ? center : [0, 0],
-      timestamp: timestamp || new Date().toISOString().replace('T', ' ').substring(0, 19)
-    };
+      material_type: req.body.material_type,
+      confidence: req.body.confidence,
+      center: center,
+      timestamp: timestamp
+    });
 
-    if (mongoose.connection.readyState !== 1) {
-      const io = req.app.get('io');
-      if (io) {
-        io.emit('new_detection', detObj);
+    let savedToMongo = false;
+    // 2. Also persist to MongoDB Atlas if connected
+    if (mongoose.connection.readyState === 1) {
+      try {
+        const detection = new Detection(detObj);
+        await detection.save();
+        savedToMongo = true;
+      } catch (e) {
+        console.warn('[MongoDB] Save warning:', e.message);
       }
-      return res.status(201).json({ success: true, detection: detObj, mode: 'memory' });
     }
 
-    const detection = new Detection(detObj);
-    await detection.save();
-
-    // Broadcast new detection and updated stats via Socket.IO
+    // 3. Broadcast real-time detection & stats to connected dashboard clients
     const io = req.app.get('io');
     if (io) {
-      io.emit('new_detection', detection.toEventJSON());
-
+      io.emit('new_detection', detObj);
       const stats = await computeDashboardStats();
       io.emit('stats_update', stats);
     }
 
-    res.status(201).json({ success: true, detection: detection.toEventJSON() });
+    res.status(201).json({
+      success: true,
+      detection: detObj,
+      database: savedToMongo ? 'mongodb_atlas' : 'persistent_store'
+    });
   } catch (err) {
     console.error('Error saving detection:', err);
-    res.status(500).json({ error: 'Failed to store detection event' });
+    res.status(500).json({ error: 'Failed to store detection event: ' + err.message });
   }
 });
 
