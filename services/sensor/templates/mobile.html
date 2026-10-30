@@ -645,15 +645,18 @@
               `;
               bannerBin.textContent = `Disposal: ${topItem.item.bin}`;
 
-              // Send live detection to EcoWing dashboard (throttled to 1/sec)
+              // Send live detection to EcoWing database (throttled to 1/sec)
               const now = Date.now();
               if (now - lastDetectionBroadcastTime > 1000) {
                 lastDetectionBroadcastTime = now;
+                const matType = topItem.item.recyclable ? 'Recyclable' : (topItem.item.biodegradable ? 'Biodegradable' : 'Non-Recyclable');
+                const confNormalized = Number((topItem.conf / 100).toFixed(2));
                 const detEvent = {
                   type: 'detection',
                   item: topItem.item.name,
-                  material: topItem.item.category,
-                  confidence: topItem.conf,
+                  material: matType,
+                  material_type: matType,
+                  confidence: confNormalized,
                   recyclable: topItem.item.recyclable,
                   biodegradable: topItem.item.biodegradable,
                   bin: topItem.item.bin
@@ -664,14 +667,15 @@
                   try { if (c.open) c.send(detEvent); } catch(e){}
                 });
 
-                // Over HTTP REST
+                // Over HTTP REST to save directly into EcoWing database
                 fetch(`${ECOWING_TARGET}/api/drone/detection`, {
                   method: "POST",
                   headers: { "Content-Type": "application/json" },
                   body: JSON.stringify({
                     drone_id: 'Phone Camera',
                     class_name: topItem.item.name,
-                    confidence: topItem.conf,
+                    material_type: matType,
+                    confidence: confNormalized,
                     center: [320, 240]
                   })
                 }).catch(() => {});

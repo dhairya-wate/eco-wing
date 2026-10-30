@@ -117,7 +117,8 @@ document.addEventListener("DOMContentLoaded", () => {
   let isCameraActive = false;
   let isRelaying = false;
   let relayInterval = null;
-  let relayTarget = localStorage.getItem("ecowing_target_website") || "http://localhost:3000";
+  let relayTarget = localStorage.getItem("ecowing_target_website") || "https://eco-wing-7pua.vercel.app";
+  let lastRelayDetectionTime = 0;
 
   if (targetWebsiteUrl) targetWebsiteUrl.value = relayTarget;
   if (inputBackendUrl) inputBackendUrl.value = backendUrl;
@@ -317,6 +318,27 @@ document.addEventListener("DOMContentLoaded", () => {
             non_biodegradable_count: wasteItems.length - bioCount,
             items: wasteItems
           });
+
+          // Automatically persist detections into EcoWing database (throttled to 1/sec)
+          if (wasteItems.length > 0) {
+            const now = Date.now();
+            if (now - lastRelayDetectionTime > 1200) {
+              lastRelayDetectionTime = now;
+              const top = wasteItems[0];
+              const endpoint = (relayTarget || "https://eco-wing-7pua.vercel.app").replace(/\/$/, "");
+              fetch(`${endpoint}/api/drone/detection`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  drone_id: "Device Webcam",
+                  class_name: top.name,
+                  material_type: top.recyclable ? "Recyclable" : (top.biodegradable ? "Biodegradable" : "Non-Recyclable"),
+                  confidence: Number((top.confidence / 100).toFixed(2)),
+                  center: [320, 240]
+                })
+              }).catch(() => {});
+            }
+          }
         } catch (e) {
           console.error("AI detection error:", e);
         }
