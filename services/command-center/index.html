@@ -2272,9 +2272,9 @@ html:not(.authed) body{overflow:hidden}
       <div><label for="adName">Drone identifier / callsign</label><input class="mp-in" id="adName" placeholder="e.g. EcoWing-01" maxlength="24" autocomplete="off"></div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
         <div><label for="adType">Protocol link</label><select class="mp-in" id="adType"><option value="wifi">HTTP REST / Wi-Fi</option><option value="socket">WebSocket / Socket.IO</option><option value="mavlink">MAVLink (UDP / TCP)</option><option value="rtsp">Video Stream (RTSP / HTTP)</option><option value="serial">USB / Serial</option></select></div>
-        <div><label for="adAddr" id="adAddrL">Drone IP / Address</label><input class="mp-in" id="adAddr" placeholder="192.168.1.50" autocomplete="off"></div>
+        <div><label for="adAddr" id="adAddrL">Drone IP / Address</label><input class="mp-in" id="adAddr" placeholder="192.0.2.10" autocomplete="off"></div>
       </div>
-      <div><label for="adStream">External Camera Stream URL <span style="font-weight:400;color:var(--text-muted)">(optional &mdash; leave blank to use default MJPEG feed)</span></label><input class="mp-in" id="adStream" placeholder="http://192.168.1.50:8080/video or rtsp://..." autocomplete="off"></div>
+      <div><label for="adStream">External Camera Stream URL <span style="font-weight:400;color:var(--text-muted)">(optional &mdash; leave blank to use default MJPEG feed)</span></label><input class="mp-in" id="adStream" placeholder="http://192.0.2.10:8080/video or rtsp://..." autocomplete="off"></div>
       <div style="background:var(--surface-2);border-radius:8px;padding:10px 12px;font-size:12px;color:var(--text-secondary);display:flex;align-items:center;justify-content:space-between">
         <span><i class="ti ti-server" style="color:var(--primary);margin-right:6px"></i>Backend listener: <b style="color:var(--text-primary)" id="adBackendHost">http://localhost:3000</b></span>
         <span class="status-badge ok" style="font-size:11px;padding:2px 8px"><span class="dot ok"></span> Active</span>
@@ -3444,7 +3444,7 @@ fetch(API_BASE + '/api/events').then(r => r.json()).then(events => {
     }).catch(()=>{});
     D.splice(i,1);if(cur>=D.length)cur=Math.max(0,D.length-1);else if(i<cur)cur--;applyFeed();render();toast(k.n+' disconnected','warn','ti-plug-off')});
   function applyFeed(){const im=$('liveFeedImg'),src=(d()&&d().feed)||'/video_feed';if(im.getAttribute('src')!==src)im.src=src}
-  const ADDR={wifi:['IP address','192.168.1.50'],socket:['WebSocket Host','ws://localhost:3000'],mavlink:['MAVLink endpoint','udp://0.0.0.0:14550'],rtsp:['Stream address','rtsp://192.168.1.50:554/live'],serial:['Serial port','/dev/ttyUSB0 or COM3']};
+  const ADDR={wifi:['IP address','192.0.2.10'],socket:['WebSocket Host','ws://localhost:3000'],mavlink:['MAVLink endpoint','udp://0.0.0.0:14550'],rtsp:['Stream address','rtsp://192.0.2.10:554/live'],serial:['Serial port','/dev/ttyUSB0 or COM3']};
   const adOpen=()=>{
     ['adName','adAddr','adStream'].forEach(i=>$(i).value='');
     $('adType').value='wifi';
@@ -3462,7 +3462,7 @@ fetch(API_BASE + '/api/events').then(r => r.json()).then(events => {
     $('adName').focus();
   };
   const adClose=()=>$('adModal').classList.remove('open');
-  function adType(){const a=ADDR[$('adType').value]||['Address','192.168.1.50'];$('adAddrL').textContent=a[0];$('adAddr').placeholder=a[1]}
+  function adType(){const a=ADDR[$('adType').value]||['Address','192.0.2.10'];$('adAddrL').textContent=a[0];$('adAddr').placeholder=a[1]}
   $('adType').onchange=adType;
   $('addDroneBtn').onclick=adOpen;
   $('addDroneBtn2').onclick=adOpen;
