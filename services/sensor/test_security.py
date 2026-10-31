@@ -1,6 +1,7 @@
 import os
 import sys
 import subprocess
+from pathlib import Path
 import pytest
 
 def test_startup_fails_without_operator_token():
@@ -41,3 +42,9 @@ def test_startup_fails_with_36_char_repeated_pattern_token():
     )
     assert proc.returncode != 0
     assert "repeated pattern" in proc.stderr
+
+def test_fixture_files_exist_on_disk():
+    """All 7 image fixtures (PNG, JPG, GIF, BMP, WebP VP8/VP8L/VP8X) exist on disk."""
+    fixtures_dir = Path(__file__).resolve().parent / "test_samples" / "fixtures"
+    for fname in ["sample.png", "sample.jpg", "sample.gif", "sample.bmp", "sample_vp8.webp", "sample_vp8l.webp", "sample_vp8x.webp"]:
+        assert (fixtures_dir / fname).exists(), f"Fixture {fname} missing"

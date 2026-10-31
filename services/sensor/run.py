@@ -8,7 +8,7 @@ if sys.platform == "win32":
         pass
 
 import uvicorn
-from config import DEFAULT_HOST, DEFAULT_PORT, get_local_ip, MODEL_PATH
+from config import DEFAULT_HOST, DEFAULT_PORT, get_local_ip, MODEL_PATH, MAX_UPLOAD_SIZE_BYTES
 
 def main():
     local_ip = get_local_ip()
@@ -32,7 +32,14 @@ def main():
     print(f'     <img src="http://{local_ip}:{DEFAULT_PORT}/video_feed" width="100%" />')
     print("=" * 70 + "\n")
 
-    uvicorn.run("app:app", host=DEFAULT_HOST, port=DEFAULT_PORT, reload=False, log_level="info")
+    uvicorn.run(
+        "app:app",
+        host=DEFAULT_HOST,
+        port=DEFAULT_PORT,
+        reload=False,
+        log_level="info",
+        ws_max_size=MAX_UPLOAD_SIZE_BYTES
+    )
 
 if __name__ == "__main__":
     main()

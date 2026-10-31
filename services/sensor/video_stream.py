@@ -3,7 +3,7 @@ import threading
 import time
 import numpy as np
 from pathlib import Path
-from config import SAMPLE_DIR
+from config import SAMPLE_DIR, sanitize_source_url
 
 class VideoStreamManager:
     def __init__(self, source="0"):
@@ -58,11 +58,11 @@ class VideoStreamManager:
             print(f"[VideoStream] Connecting to webcam index {cam_idx}...")
             self.cap = cv2.VideoCapture(cam_idx)
         else:
-            print(f"[VideoStream] Connecting to stream/file: {self.source}...")
+            print(f"[VideoStream] Connecting to stream/file: {sanitize_source_url(self.source)}...")
             self.cap = cv2.VideoCapture(self.source)
 
         if not self.cap or not self.cap.isOpened():
-            print(f"[VideoStream] Source '{self.source}' not accessible. Falling back to DEMO SIMULATOR.")
+            print(f"[VideoStream] Source '{sanitize_source_url(self.source)}' not accessible. Falling back to DEMO SIMULATOR.")
             self.is_simulator = True
             if self.cap is not None:
                 try:
@@ -71,7 +71,7 @@ class VideoStreamManager:
                     pass
                 self.cap = None
         else:
-            print(f"[VideoStream] Successfully opened: {self.source}")
+            print(f"[VideoStream] Successfully opened: {sanitize_source_url(self.source)}")
             self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
             self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
 
