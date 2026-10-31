@@ -36,15 +36,92 @@ A real-time AI computer vision software designed for the **EcoWing Project**. It
 
 When the server is running on your machine:
 
-| Feature | Endpoint URL | Description |
-| :--- | :--- | :--- |
-| **Web Dashboard** | `http://localhost:5000` or `http://192.168.31.44:5000` | Full browser control interface |
-| **Video Stream URL** | `http://192.168.31.44:5000/video_feed` | Direct MJPEG video feed for website embed |
-| **Telemetry API** | `http://192.168.31.44:5000/api/detections` | Live waste counts & classification JSON |
-| **WebSocket** | `ws://192.168.31.44:5000/ws` | Low-latency live stream data feed |
-| **System Info** | `http://192.168.31.44:5000/api/system_info` | Network status and copyable embed codes |
+| Feature | Endpoint URL | Auth Required | Description |
+| :--- | :--- | :---: | :--- |
+| **Web Dashboard** | `http://localhost:5000` | Optional | Browser control interface |
+| **Video Stream URL** | `http://<IP>:5000/video_feed` | Public | Direct MJPEG video feed for website embed |
+| **Telemetry API** | `http://<IP>:5000/api/detections` | Public | Live waste counts & classification JSON |
+| **WebSocket** | `ws://<IP>:5000/ws` | Public | Low-latency live telemetry stream |
+| **Settings Control** | `POST http://<IP>:5000/api/settings` | `X-Operator-Token` | Adjust confidence and video source |
+| **Image Upload** | `POST http://<IP>:5000/api/upload` | `X-Operator-Token` | Upload image for waste analysis (max 5 MB) |
+| **System Info** | `GET http://<IP>:5000/api/system_info` | `X-Operator-Token` | System configuration (redacted URLs) |
+| **Mobile Pairing** | `POST http://<IP>:5000/api/mobile/pairing_code` | `X-Operator-Token` | Generate 6-char pairing code (5 min TTL) |
+| **Code Exchange** | `POST http://<IP>:5000/api/mobile/exchange` | Public | Exchange pairing code for scoped session |
+| **Mobile Stream WS** | `ws://<IP>:5000/ws/mobile_stream` | In-band session auth | Phone camera stream ingest |
 
-*(Note: Replace `192.168.31.44` with your machine's current local IP address if it changes).*
+> [!IMPORTANT]
+> **API Contract Change Notice (`/api/system_info`):**
+> `/api/system_info` previously allowed unauthenticated access and exposed raw camera source URLs. It now strictly requires the `X-Operator-Token` header.
+>
+> **Migration Path for Callers:**
+> - Callers displaying live detection metrics should query `GET /api/detections` or connect to `WebSocket /ws`, which remain public and require no authentication.
+> - Callers managing server configuration must provide the header: `X-Operator-Token: <your_operator_token>`.
+> - Query parameter authentication (`?token=`) is strictly rejected with HTTP 401 Unauthorized.
+
+---
+
+## 🔒 Security & Operator Authentication
+
+1. **Deployment Architecture Decision:**
+   - **Local Behind Nginx:** EcoWing and Detection are designed to run locally on-premises or on a field computer behind Nginx.
+   - **Remote Access via VPN:** Remote monitoring or mobile connections outside the local LAN must use an encrypted VPN (e.g. WireGuard, Tailscale). Never expose raw ports to the public internet.
+   - **Vercel Demo Notice:** The public Vercel frontend is an unlinked static preview. It does not connect to the local backend due to HTTPS Mixed Content restrictions.
+
+2. **Operator Authorization & Fail-Fast Startup:**
+   - Detection requires `DETECTION_OPERATOR_TOKEN` to be set to a cryptographically secure token of at least 32 characters.
+   - The token must contain at least 12 distinct characters and must not consist of repeated periodic patterns (e.g. `"abcd" * 9` or `"a" * 36`).
+   - The server fails fast on startup with a critical error if the token is unset, shorter than 32 characters, or repetitive.
+   - Sensitive endpoints (`/api/settings`, `/api/upload`, `/api/system_info`, `/api/mobile/pairing_code`) strictly require the `X-Operator-Token` header.
+
+3. **Hardened Mobile Camera Pairing Flow & Secure Context Transport:**
+   - **Secure Context Requirement:** Camera access via `navigator.mediaDevices.getUserMedia` strictly requires a W3C Secure Context (`window.isSecureContext === true`). Modern web browsers treat only `https://` origins and `http://localhost` / `http://127.0.0.1` as secure contexts. Plain HTTP connections over a LAN (e.g. `http://192.168.1.X:5000/mobile`) block camera access completely.
+   - Consequently, remote mobile streaming requires HTTPS (via an Nginx/Caddy TLS reverse proxy or secure tunnel).
+   - Mobile streaming is **disabled by default** (`MOBILE_ENABLED=false`). Set `MOBILE_ENABLED=true` in `.env` to enable it.
+   - To prevent leaking operator credentials to phone browsers, the operator generates an 8-character pairing code from an unambiguous alphabet via `POST /api/mobile/pairing_code`.
+   - The phone exchanges this code at `POST /api/mobile/exchange` for a single-purpose, scoped `session_token`.
+   - Failed exchange attempts are tracked per client IP; 5 failed attempts locks out the client IP address for 10 minutes (`{"detail": "Too many failed pairing attempts. IP address locked out for 10 minutes."}`, HTTP 429).
+   - **Shared-NAT & Proxy Behavior:** When multiple mobile devices share a public IP (behind corporate NAT, mobile carrier NAT, or an unconfigured reverse proxy), an IP lockout applies to all devices sharing that IP for the 10-minute lockout window. When the lockout expires, failed attempt counters reset to 0, so a single subsequent failed exchange will not immediately re-lock the IP. Legitimate operators should configure `TRUSTED_PROXIES` so client IPs are reliably resolved from `X-Forwarded-For`.
+   - In-band WebSocket authentication: The phone connects to `/ws/mobile_stream` (no token in the URL) and sends `{"type":"auth","session":"..."}` as its first message.
+   - Connection caps count both pending (unauthenticated) and active sockets against `MAX_MOBILE_WS_CONNECTIONS` (default: 5), synchronously registering sockets before any async dispatch and returning WebSocket close code `1013` with fixed reason `"Try again later: Mobile connection limit reached"` when capped.
+   - The session token is consumed immediately upon successful WebSocket connect to prevent socket replay attacks.
+   - Close frame reason phrases are strictly limited to fixed strings <= 123 bytes per RFC 6455. Server exceptions are logged server-side only with generic reason `"Internal server error: Frame ingestion failed"` sent to the client (code 1011).
+
+4. **Network Topology & Trusted Proxies:**
+   - `TRUSTED_PROXIES` defaults to `"127.0.0.1,::1,172.17.0.1,192.168.65.2"`.
+   - Security topology rule: Trust ONLY the exact gateway IP, never whole subnets or DNS names (to prevent DNS spoofing and cross-container IP spoofing).
+   - For Docker-to-host deployments (where EcoWing runs in Docker and Detection runs on the host), requests proxied through EcoWing's Nginx container reach Detection via the Docker bridge gateway address (`172.17.0.1` on Linux, or `192.168.65.2` on Docker Desktop).
+   - `X-Forwarded-For` is honored only when requests originate directly from an exact IP in `TRUSTED_PROXIES`. Untrusted peer requests ignore `X-Forwarded-For` and use the direct peer socket IP.
+
+5. **Security Error Responses Contract (`app.py` Source of Truth):**
+   - **HTTP 401 Unauthorized:**
+     - `Unauthorized: invalid or missing operator token. Provide 'X-Operator-Token' header.` (Triggered when `X-Operator-Token` header is missing, invalid, or passed via query parameter).
+     - `Invalid or expired pairing code.` (Triggered on `POST /api/mobile/exchange` when pairing code is invalid or past 300s TTL).
+   - **HTTP 413 Request Entity Too Large:**
+     - `Upload size ({declared_cl} bytes) exceeds maximum allowed limit of 5 MB.` (Triggered on declared `Content-Length` header > 5 MB).
+     - `Upload size ({file_size} bytes) exceeds maximum allowed limit of 5 MB.` (Triggered on ASGI file.size > 5 MB).
+     - `Upload size exceeds maximum allowed limit of 5 MB.` (Triggered when chunked payload stream exceeds 5 MB).
+   - **HTTP 429 Too Many Requests:**
+     - `IP temporarily locked out due to excessive failed exchange attempts. Try again in {seconds}s.` (Triggered on `POST /api/mobile/exchange` during active 10-minute IP lockout).
+     - `Too many pairing exchange requests. Please slow down.` (Triggered on `POST /api/mobile/exchange` exceeding sliding window rate limit of 10 req/min per IP).
+     - `Too many failed pairing attempts. IP address locked out for 10 minutes.` (Triggered on the 5th consecutive failed pairing exchange attempt from an IP).
+
+6. **Canonical Server Launch Command:**
+   - The production server command enforcing host, port, and the 5 MB WebSocket transport message limit is:
+     ```bash
+     uvicorn app:app --host 127.0.0.1 --port 5000 --ws-max-size 5242880
+     ```
+
+7. **Development Internet Tunnel (`start_tunnel.bat`):**
+   - `start_tunnel.bat` is strictly for **development and testing**.
+   - Running the tunnel exposes port 5000 to the public internet. Read-only endpoints (`/video_feed`, `/api/detections`, `/ws`) become publicly accessible.
+   - Requires explicit opt-in: `set ALLOW_TUNNEL=1`.
+
+---
+
+## ⚖️ Model Limitations & AGPL-3.0 License Notice
+
+- **Third-Party Dependency:** This server uses [Ultralytics YOLO](https://github.com/ultralytics/ultralytics), licensed under **AGPL-3.0**. See [`NOTICE`](./NOTICE) for details.
+- **Classification Limitations:** The shipped weights (`yolo26n.pt`) are standard 80-class COCO weights. Detected items are mapped to waste taxonomy categories via heuristic config tables. Custom-trained model weights for paper, cardboard, and industrial waste will be introduced in future updates.
 
 ---
 

@@ -63,6 +63,22 @@
       </div>
     </div>
 
+    <!-- Operator Security / In-Memory Session Token Bar -->
+    <div class="operator-banner" id="operator-banner" style="background: rgba(15, 23, 42, 0.95); border: 1px solid rgba(59, 130, 246, 0.4); border-radius: var(--radius-lg); padding: 12px 20px; margin-top: 12px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center; gap: 14px; flex-wrap: wrap;">
+      <div style="display: flex; align-items: center; gap: 10px;">
+        <span style="font-size: 18px;">🔐</span>
+        <div>
+          <div style="font-size: 13px; font-weight: 700; color: #93c5fd;">Operator Security Authentication</div>
+          <div style="font-size: 11px; color: #94a3b8;">Required for settings &amp; uploads. Stored strictly in-memory for this session (never saved to localStorage).</div>
+        </div>
+      </div>
+      <div style="display: flex; gap: 8px; align-items: center;">
+        <input type="password" id="input-operator-token" placeholder="Enter Operator Token" style="padding: 7px 12px; font-size: 12px; font-family: monospace; width: 220px; background: #0b0f14; border: 1px solid #334155; color: #f8fafc; border-radius: 6px;" />
+        <button class="btn btn-primary btn-sm" id="btn-save-operator-token" style="white-space: nowrap;">Set Token</button>
+        <span id="operator-token-status" style="font-size: 11px; font-weight: 700; color: #ef4444; margin-left: 6px;">No Token</span>
+      </div>
+    </div>
+
     <!-- Metrics Row -->
     <section class="metrics-grid">
       <div class="metric-card total-card">
@@ -184,6 +200,7 @@
           <div id="custom-source-row" class="custom-source-row hidden">
             <input type="text" id="custom-source-input" placeholder="e.g. rtsp://192.168.1.50:554/ch0 or C:\path\test.mp4" />
           </div>
+          <div id="settings-status-msg" style="margin-top: 10px; font-size: 12px; font-weight: 600;"></div>
         </div>
       </div>
 
@@ -210,6 +227,10 @@
             <div class="qr-container">
               <img id="qr-code-img" src="" alt="Scan QR with Phone" class="qr-img hidden" />
               <div class="qr-hint">Scan with your phone camera or visit link on same Wi-Fi</div>
+            </div>
+            <div style="margin-top: 12px; padding-top: 10px; border-top: 1px solid rgba(255,255,255,0.1);">
+              <button class="btn btn-secondary btn-sm" id="btn-gen-pairing-code" style="width: 100%;">🔑 Generate Mobile Pairing Code</button>
+              <div id="pairing-code-display" style="margin-top: 8px; font-size: 12px; font-weight: 700; text-align: center;"></div>
             </div>
           </div>
         </div>

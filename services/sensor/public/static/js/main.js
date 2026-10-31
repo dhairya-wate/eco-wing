@@ -580,10 +580,233 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   });
 
-  // Confidence Slider
+  // In-Memory Operator Session Token (Never stored in localStorage)
+  let sessionOperatorToken = "";
+
+  const inputOperatorToken = document.getElementById("input-operator-token");
+  const btnSaveOperatorToken = document.getElementById("btn-save-operator-token");
+  const operatorTokenStatus = document.getElementById("operator-token-status");
+
+  if (btnSaveOperatorToken && inputOperatorToken) {
+    btnSaveOperatorToken.addEventListener("click", () => {
+      sessionOperatorToken = inputOperatorToken.value.trim();
+      if (sessionOperatorToken) {
+        operatorTokenStatus.textContent = "Token Active";
+        operatorTokenStatus.style.color = "#10b981";
+      } else {
+        operatorTokenStatus.textContent = "No Token";
+        operatorTokenStatus.style.color = "#ef4444";
+      }
+    });
+  }
+
+  // Confidence Slider - UI update and server update
   confSlider.addEventListener("input", (e) => {
     confVal.textContent = `${e.target.value}%`;
   });
+
+  confSlider.addEventListener("change", async (e) => {
+    const val = parseFloat(e.target.value) / 100.0;
+    const settingsStatusMsg = document.getElementById("settings-status-msg");
+    if (!sessionOperatorToken) {
+      if (settingsStatusMsg) {
+        settingsStatusMsg.textContent = "Error: Operator Token required in header to change settings.";
+        settingsStatusMsg.style.color = "#ef4444";
+      }
+      return;
+    }
+    try {
+      const res = await fetch("/api/settings", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Operator-Token": sessionOperatorToken
+        },
+        body: JSON.stringify({ confidence: val })
+      });
+      if (res.status === 401) {
+        if (settingsStatusMsg) {
+          settingsStatusMsg.textContent = "Unauthorized: Invalid Operator Token.";
+          settingsStatusMsg.style.color = "#ef4444";
+        }
+      } else if (res.ok) {
+        if (settingsStatusMsg) {
+          settingsStatusMsg.textContent = `Confidence threshold updated to ${e.target.value}%`;
+          settingsStatusMsg.style.color = "#10b981";
+        }
+      }
+    } catch (err) {
+      if (settingsStatusMsg) {
+        settingsStatusMsg.textContent = `Error: ${err.message}`;
+        settingsStatusMsg.style.color = "#ef4444";
+      }
+    }
+  });
+
+  // Source Switching
+  const btnApplySource = document.getElementById("btn-apply-source");
+  const sourceSelect = document.getElementById("source-select");
+  const customSourceRow = document.getElementById("custom-source-row");
+  const customSourceInput = document.getElementById("custom-source-input");
+
+  if (sourceSelect && customSourceRow) {
+    sourceSelect.addEventListener("change", (e) => {
+      if (e.target.value === "custom") {
+        customSourceRow.classList.remove("hidden");
+      } else {
+        customSourceRow.classList.add("hidden");
+      }
+    });
+  }
+
+  if (btnApplySource) {
+    btnApplySource.addEventListener("click", async () => {
+      const settingsStatusMsg = document.getElementById("settings-status-msg");
+      if (!sessionOperatorToken) {
+        if (settingsStatusMsg) {
+          settingsStatusMsg.textContent = "Error: Operator Token required in header to switch sources.";
+          settingsStatusMsg.style.color = "#ef4444";
+        }
+        return;
+      }
+      let chosen = sourceSelect.value;
+      if (chosen === "custom") {
+        chosen = customSourceInput.value.trim();
+      }
+      try {
+        const res = await fetch("/api/settings", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Operator-Token": sessionOperatorToken
+          },
+          body: JSON.stringify({ source: chosen })
+        });
+        if (res.status === 401) {
+          if (settingsStatusMsg) {
+            settingsStatusMsg.textContent = "Unauthorized: Invalid Operator Token.";
+            settingsStatusMsg.style.color = "#ef4444";
+          }
+        } else if (res.ok) {
+          if (settingsStatusMsg) {
+            settingsStatusMsg.textContent = `Source switched to: ${chosen}`;
+            settingsStatusMsg.style.color = "#10b981";
+          }
+        }
+      } catch (err) {
+        if (settingsStatusMsg) {
+          settingsStatusMsg.textContent = `Error: ${err.message}`;
+          settingsStatusMsg.style.color = "#ef4444";
+        }
+      }
+    });
+  }
+
+  // Upload dropzone & file handling
+  const dropzone = document.getElementById("dropzone");
+  const fileInput = document.getElementById("file-input");
+  const uploadResult = document.getElementById("upload-result");
+
+  if (dropzone && fileInput) {
+    dropzone.addEventListener("click", () => fileInput.click());
+    dropzone.addEventListener("dragover", (e) => {
+      e.preventDefault();
+      dropzone.classList.add("dragover");
+    });
+    dropzone.addEventListener("dragleave", () => dropzone.classList.remove("dragover"));
+    dropzone.addEventListener("drop", (e) => {
+      e.preventDefault();
+      dropzone.classList.remove("dragover");
+      if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+        handleUpload(e.dataTransfer.files[0]);
+      }
+    });
+    fileInput.addEventListener("change", (e) => {
+      if (e.target.files && e.target.files[0]) {
+        handleUpload(e.target.files[0]);
+      }
+    });
+  }
+
+  async function handleUpload(file) {
+    if (!uploadResult) return;
+    uploadResult.classList.remove("hidden");
+    if (!sessionOperatorToken) {
+      uploadResult.innerHTML = `<div style="color: #ef4444; padding: 10px; font-weight: 600;">⚠️ Unauthorized: Operator Token required in header to upload. Enter token in the Operator Authentication bar above.</div>`;
+      return;
+    }
+    uploadResult.innerHTML = `<div style="color: #94a3b8; padding: 10px;">Uploading and analyzing image (${(file.size / 1024).toFixed(1)} KB)...</div>`;
+    const formData = new FormData();
+    formData.append("file", file);
+    try {
+      const res = await fetch("/api/upload", {
+        method: "POST",
+        headers: {
+          "X-Operator-Token": sessionOperatorToken
+        },
+        body: formData
+      });
+      if (res.status === 401) {
+        uploadResult.innerHTML = `<div style="color: #ef4444; padding: 10px; font-weight: 600;">⚠️ Unauthorized: Invalid Operator Token.</div>`;
+        return;
+      }
+      if (res.status === 413) {
+        uploadResult.innerHTML = `<div style="color: #ef4444; padding: 10px; font-weight: 600;">⚠️ Error: File exceeds maximum allowed size (5 MB).</div>`;
+        return;
+      }
+      if (res.status === 400) {
+        const errJson = await res.json().catch(() => ({}));
+        uploadResult.innerHTML = `<div style="color: #ef4444; padding: 10px; font-weight: 600;">⚠️ Error: ${errJson.detail || "Invalid image file format"}.</div>`;
+        return;
+      }
+      if (res.ok) {
+        const data = await res.json();
+        const analysis = data.analysis;
+        uploadResult.innerHTML = `
+          <div style="margin-top: 10px; border-top: 1px solid #334155; padding-top: 10px;">
+            <div style="font-weight: 700; color: #10b981; margin-bottom: 6px;">Analysis Complete (${analysis.total_count} items detected):</div>
+            <img src="${data.annotated_image}" style="max-width: 100%; border-radius: 8px; margin-bottom: 8px;" />
+            <div style="font-size: 12px; color: #cbd5e1;">
+              Recyclable: ${analysis.recyclable_count} | Biodegradable: ${analysis.biodegradable_count}
+            </div>
+          </div>
+        `;
+      }
+    } catch (err) {
+      uploadResult.innerHTML = `<div style="color: #ef4444; padding: 10px;">Upload failed: ${err.message}</div>`;
+    }
+  }
+
+  // Pairing code generation
+  const btnGenPairingCode = document.getElementById("btn-gen-pairing-code");
+  const pairingCodeDisplay = document.getElementById("pairing-code-display");
+  if (btnGenPairingCode) {
+    btnGenPairingCode.addEventListener("click", async () => {
+      if (!sessionOperatorToken) {
+        alert("Operator Token required in header to generate mobile pairing code.");
+        return;
+      }
+      try {
+        const res = await fetch("/api/mobile/pairing_code", {
+          method: "POST",
+          headers: { "X-Operator-Token": sessionOperatorToken }
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (pairingCodeDisplay) {
+            pairingCodeDisplay.textContent = `Pairing Code: ${data.pairing_code} (Valid for ${data.expires_in}s)`;
+            pairingCodeDisplay.style.color = "#10b981";
+          }
+        } else {
+          const errData = await res.json().catch(() => ({}));
+          alert(`Failed to generate code: ${errData.detail || res.statusText}`);
+        }
+      } catch (e) {
+        alert("Failed to generate pairing code: " + e.message);
+      }
+    });
+  }
+
 
   // Snippet Tabs
   const tabBtns = document.querySelectorAll(".tab-btn");
