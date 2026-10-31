@@ -526,3 +526,83 @@ def test_e1_command_injection_and_parameter_validation():
     assert out["invalid_camera_cmd"] == 400
     assert out["invalid_zoom"] == 400
     assert out["valid_zoom"] == 200
+
+def test_e2_telemetry_coordinate_battery_validation():
+    """
+    E2: Input validation on /api/drone/telemetry.
+    Rejects out of bounds coordinates, negative/excessive battery percentages, etc.
+    """
+    code = """
+    const express = require('express');
+    const http = require('http');
+
+    const droneRouter = require('./backend/routes/drone');
+    const app = express();
+    app.use(express.json());
+    app.use('/api/drone', droneRouter);
+
+    const srv = http.createServer(app);
+    srv.listen(0, '127.0.0.1', async () => {
+        const port = srv.address().port;
+        const url = `http://127.0.0.1:${port}/api/drone/telemetry`;
+
+        // 1. Invalid battery > 100 -> 400
+        const r1 = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ drone_id: 'Drone-01', battery_pct: 125 })
+        });
+
+        // 2. Invalid latitude > 90 -> 400
+        const r2 = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ drone_id: 'Drone-01', latitude: 95.5, longitude: 10.0 })
+        });
+
+        // 3. Invalid longitude < -180 -> 400
+        const r3 = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ drone_id: 'Drone-01', latitude: 45.0, longitude: -195.0 })
+        });
+
+        // 4. Invalid drone_id -> 400
+        const r4 = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ drone_id: 'Drone-01$(reboot)', battery_pct: 80 })
+        });
+
+        // 5. Valid telemetry -> 200
+        const r5 = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                drone_id: 'Drone-01',
+                battery_pct: 88,
+                latitude: 37.7749,
+                longitude: -122.4194,
+                altitude_m: 15.5,
+                speed_mps: 4.2,
+                heading_deg: 180
+            })
+        });
+
+        console.log(JSON.stringify({
+            invalid_batt: r1.status,
+            invalid_lat: r2.status,
+            invalid_lng: r3.status,
+            invalid_drone_id: r4.status,
+            valid_telemetry: r5.status
+        }));
+        srv.close();
+        setTimeout(() => process.exit(0), 50);
+    });
+    """
+    out = run_node_eval(code)
+    assert out["invalid_batt"] == 400
+    assert out["invalid_lat"] == 400
+    assert out["invalid_lng"] == 400
+    assert out["invalid_drone_id"] == 400
+    assert out["valid_telemetry"] == 200

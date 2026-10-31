@@ -28,6 +28,14 @@ EcoWing/
 
 ## 1. Stack Overview
 
+- **Canonical Deployment:** The EcoWing Command Center dashboard runs locally behind Nginx (port `8080`).
+- **Remote Access via VPN:** Remote operators connecting from outside the local network must use an encrypted VPN (such as WireGuard or Tailscale). The backend port (3000) and MongoDB must not be exposed to the public internet.
+- **Operator Authentication (`ECOWING_OPERATOR_TOKEN`):** Sensitive operations (`POST /api/drone/connect`, `POST /api/drone/command`, `POST /api/camera/command`, `POST /api/drone/select`) strictly require the operator token in the `X-Operator-Token` header. Startup validation enforces a minimum of 32 characters, 12 unique characters, and non-repeating entropy.
+- **Target Address Allowlist (`DRONE_TARGET_ALLOWLIST`) & Anti-SSRF:** The "Connect Drone" target address is strictly checked against the `DRONE_TARGET_ALLOWLIST` environment variable (default: empty, strict deny-all). All hostnames are resolved, every returned address is checked against the allowlist (preventing DNS rebinding attacks), and HTTP connections are made directly to the verified IP with redirects strictly disabled.
+- **E1 Drone & Camera Command Sanitization:** Drone commands are strictly restricted to `start`, `hold`, `rth`, `land`. Camera commands are restricted to `photo`, `record`, `zoom`, `track` with strict type and numeric range checks (e.g. zoom: 1.0 to 10.0). `drone_id` identifiers are enforced to alphanumeric with hyphens/underscores (max 64 chars).
+- **E2 Telemetry Bounds Validation:** Ingested drone telemetry (`POST /api/drone/telemetry`) strictly validates numeric bounds for coordinates (latitude [-90, 90], longitude [-180, 180]), battery [0, 100]%, altitude [-100, 10000]m, speed [0, 100]m/s, and heading [0, 360]deg. Malformed or out-of-bounds telemetry is rejected with HTTP 400.
+- **Vercel Frontend Demo Notice:** The public Vercel frontend deployment (`https://eco-wing-7pua.vercel.app`) is an unlinked, static demonstration preview only. It is not connected to the local backend, and browsers block HTTPS-to-HTTP local network connections as Mixed Content.
+
 - **MongoDB Database**: Holds collections for `detections`, `telemetries`, and `drones`. Kept clean and empty by default until a drone connects and streams live data.
 - **Node.js + Express Backend**: Provides all REST APIs expected by the dashboard and listens for commands.
 - **Socket.IO v4 Server**: Handles low-latency real-time telemetry updates, new detection broadcasts, and command verification.
