@@ -376,3 +376,153 @@ def test_dns_rebinding_rejected_with_resolver_stub():
     assert out["good_verified_ip"] == "192.0.2.10"
     assert out["good_connect_url"] == "http://192.0.2.10:8080/feed"
     assert out["good_original_host"] == "camera.drone.lan"
+
+def test_command_routes_operator_auth_and_401():
+    """
+    Verifies that /api/drone/command, /api/camera/command, and /api/drone/select
+    all require operator authentication (401 without token, 401 with invalid token, 200 with valid token).
+    """
+    code = """
+    const express = require('express');
+    const http = require('http');
+    process.env.ECOWING_OPERATOR_TOKEN = 'secure_test_operator_token_9xK2mP7qR4vL8wZ1';
+
+    const { router: apiRouter } = require('./backend/routes/api');
+    const app = express();
+    app.use(express.json());
+    app.use('/api', apiRouter);
+
+    const srv = http.createServer(app);
+    srv.listen(0, '127.0.0.1', async () => {
+        const port = srv.address().port;
+        const results = {};
+
+        const endpoints = [
+            { name: 'drone_command', path: '/api/drone/command', body: { drone_id: 'Drone-01', command: 'start' } },
+            { name: 'camera_command', path: '/api/camera/command', body: { command: 'photo' } },
+            { name: 'drone_select', path: '/api/drone/select', body: { drone_id: 'Drone-01' } }
+        ];
+
+        for (const ep of endpoints) {
+            const url = `http://127.0.0.1:${port}${ep.path}`;
+
+            // 1. Missing token -> 401
+            const r1 = await fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(ep.body)
+            });
+
+            // 2. Bad token -> 401
+            const r2 = await fetch(url, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-Operator-Token': 'wrong_token_value_here'
+                },
+                body: JSON.stringify(ep.body)
+            });
+
+            // 3. Valid token -> 200
+            const r3 = await fetch(url, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-Operator-Token': 'secure_test_operator_token_9xK2mP7qR4vL8wZ1'
+                },
+                body: JSON.stringify(ep.body)
+            });
+
+            results[ep.name] = {
+                no_token: r1.status,
+                bad_token: r2.status,
+                valid_token: r3.status
+            };
+        }
+
+        console.log(JSON.stringify(results));
+        srv.close();
+        setTimeout(() => process.exit(0), 50);
+    });
+    """
+    out = run_node_eval(code)
+    for name in ["drone_command", "camera_command", "drone_select"]:
+        assert out[name]["no_token"] == 401, f"{name} should reject missing token with 401"
+        assert out[name]["bad_token"] == 401, f"{name} should reject bad token with 401"
+        assert out[name]["valid_token"] == 200, f"{name} should accept valid token with 200"
+
+def test_e1_command_injection_and_parameter_validation():
+    """
+    E1: Command injection prevention on /api/drone/command and /api/camera/command.
+    Rejects unauthorized commands and invalid parameters with HTTP 400.
+    """
+    code = """
+    const express = require('express');
+    const http = require('http');
+    process.env.ECOWING_OPERATOR_TOKEN = 'secure_test_operator_token_9xK2mP7qR4vL8wZ1';
+
+    const { router: apiRouter } = require('./backend/routes/api');
+    const app = express();
+    app.use(express.json());
+    app.use('/api', apiRouter);
+
+    const srv = http.createServer(app);
+    srv.listen(0, '127.0.0.1', async () => {
+        const port = srv.address().port;
+        const authHeaders = {
+            'Content-Type': 'application/json',
+            'X-Operator-Token': 'secure_test_operator_token_9xK2mP7qR4vL8wZ1'
+        };
+
+        // 1. Drone command invalid command -> 400
+        const r1 = await fetch(`http://127.0.0.1:${port}/api/drone/command`, {
+            method: 'POST',
+            headers: authHeaders,
+            body: JSON.stringify({ drone_id: 'Drone-01', command: 'reboot_os; rm -rf /' })
+        });
+
+        // 2. Drone command invalid drone_id -> 400
+        const r2 = await fetch(`http://127.0.0.1:${port}/api/drone/command`, {
+            method: 'POST',
+            headers: authHeaders,
+            body: JSON.stringify({ drone_id: 'Drone-01; echo pwned', command: 'start' })
+        });
+
+        // 3. Camera command invalid command -> 400
+        const r3 = await fetch(`http://127.0.0.1:${port}/api/camera/command`, {
+            method: 'POST',
+            headers: authHeaders,
+            body: JSON.stringify({ command: 'format_storage' })
+        });
+
+        // 4. Camera command zoom out of bounds -> 400
+        const r4 = await fetch(`http://127.0.0.1:${port}/api/camera/command`, {
+            method: 'POST',
+            headers: authHeaders,
+            body: JSON.stringify({ command: 'zoom', value: 99.0 })
+        });
+
+        // 5. Valid camera zoom -> 200
+        const r5 = await fetch(`http://127.0.0.1:${port}/api/camera/command`, {
+            method: 'POST',
+            headers: authHeaders,
+            body: JSON.stringify({ command: 'zoom', value: 3.5 })
+        });
+
+        console.log(JSON.stringify({
+            invalid_cmd: r1.status,
+            invalid_drone_id: r2.status,
+            invalid_camera_cmd: r3.status,
+            invalid_zoom: r4.status,
+            valid_zoom: r5.status
+        }));
+        srv.close();
+        setTimeout(() => process.exit(0), 50);
+    });
+    """
+    out = run_node_eval(code)
+    assert out["invalid_cmd"] == 400
+    assert out["invalid_drone_id"] == 400
+    assert out["invalid_camera_cmd"] == 400
+    assert out["invalid_zoom"] == 400
+    assert out["valid_zoom"] == 200

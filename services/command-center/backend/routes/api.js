@@ -6,6 +6,12 @@ const Drone = require('../models/Drone');
 const Telemetry = require('../models/Telemetry');
 const { getStreamStats } = require('../videoStream');
 const detectionStore = require('../detectionStore');
+const { verifyOperatorToken } = require('../middleware/auth');
+
+// E1: Whitelist definitions and identifier constraints
+const ALLOWED_DRONE_COMMANDS = ['start', 'hold', 'rth', 'land'];
+const ALLOWED_CAMERA_COMMANDS = ['photo', 'record', 'zoom', 'track'];
+const DRONE_ID_REGEX = /^[a-zA-Z0-9_\-]+$/;
 
 // Preset colors for site analysis charts
 const CLASS_COLORS = [
@@ -257,11 +263,23 @@ router.get('/telemetry', async (req, res) => {
  * POST /api/drone/select
  * Select active drone
  */
-router.post('/drone/select', async (req, res) => {
+router.post('/drone/select', verifyOperatorToken, async (req, res) => {
   try {
     const { drone_id } = req.body;
-    if (!drone_id) {
-      return res.status(400).json({ error: 'drone_id is required' });
+    if (!drone_id || typeof drone_id !== 'string' || !DRONE_ID_REGEX.test(drone_id) || drone_id.length > 64) {
+      return res.status(400).json({ error: 'Invalid drone_id. Must be alphanumeric with hyphens/underscores (max 64 chars).' });
+    }
+
+    if (mongoose.connection.readyState !== 1) {
+      const io = req.app.get('io');
+      if (io) {
+        io.emit('telemetry_update', {
+          active_drone: drone_id,
+          all_drones: { [drone_id]: { status: 'Idle', battery_pct: 100 } },
+          telemetry: null
+        });
+      }
+      return res.json({ success: true, active_drone: drone_id, mode: 'memory' });
     }
 
     await Drone.updateMany({}, { is_active: false });
@@ -300,13 +318,17 @@ router.post('/drone/select', async (req, res) => {
  * POST /api/drone/command
  * Send commands to drone (start, hold, rth, land)
  */
-router.post('/drone/command', async (req, res) => {
+router.post('/drone/command', verifyOperatorToken, async (req, res) => {
   try {
     const { command, drone_id } = req.body;
-    if (!command || !drone_id) {
-      return res.status(400).json({ error: 'command and drone_id are required' });
+    if (!drone_id || typeof drone_id !== 'string' || !DRONE_ID_REGEX.test(drone_id) || drone_id.length > 64) {
+      return res.status(400).json({ error: 'Invalid drone_id. Must be alphanumeric with hyphens/underscores (max 64 chars).' });
+    }
+    if (!command || typeof command !== 'string' || !ALLOWED_DRONE_COMMANDS.includes(command.trim().toLowerCase())) {
+      return res.status(400).json({ error: "Invalid drone command. Allowed commands: 'start', 'hold', 'rth', 'land'." });
     }
 
+    const cleanCommand = command.trim().toLowerCase();
     const commandStatusMap = {
       start: 'Flying',
       hold: 'Holding',
@@ -314,7 +336,16 @@ router.post('/drone/command', async (req, res) => {
       land: 'Landing'
     };
 
-    const newStatus = commandStatusMap[command.toLowerCase()] || command;
+    const newStatus = commandStatusMap[cleanCommand];
+
+    if (mongoose.connection.readyState !== 1) {
+      const io = req.app.get('io');
+      if (io) {
+        io.emit('drone_command_executed', { command: cleanCommand, drone_id });
+        io.to(`drone:${drone_id}`).emit('command', { command: cleanCommand });
+      }
+      return res.json({ message: `${drone_id} received command: ${cleanCommand.toUpperCase()}`, mode: 'memory' });
+    }
 
     const drone = await Drone.findOneAndUpdate(
       { drone_id },
@@ -359,19 +390,43 @@ router.post('/drone/command', async (req, res) => {
  * POST /api/camera/command
  * Camera control (photo, record, zoom, track)
  */
-router.post('/camera/command', async (req, res) => {
+router.post('/camera/command', verifyOperatorToken, async (req, res) => {
   try {
     const { command, value } = req.body;
+    if (!command || typeof command !== 'string' || !ALLOWED_CAMERA_COMMANDS.includes(command.trim().toLowerCase())) {
+      return res.status(400).json({ error: "Invalid camera command. Allowed commands: 'photo', 'record', 'zoom', 'track'." });
+    }
+
+    const cleanCommand = command.trim().toLowerCase();
+    let sanitizedValue = value;
+
+    if (cleanCommand === 'record') {
+      if (typeof value !== 'boolean' && value !== 'true' && value !== 'false') {
+        return res.status(400).json({ error: "Parameter 'value' for 'record' must be boolean." });
+      }
+      sanitizedValue = (value === true || value === 'true');
+    } else if (cleanCommand === 'zoom') {
+      const zoomNum = Number(value);
+      if (isNaN(zoomNum) || zoomNum < 1.0 || zoomNum > 10.0) {
+        return res.status(400).json({ error: "Parameter 'value' for 'zoom' must be a number between 1.0 and 10.0." });
+      }
+      sanitizedValue = zoomNum;
+    } else if (cleanCommand === 'track') {
+      if (typeof value === 'string' && value && !DRONE_ID_REGEX.test(value)) {
+        return res.status(400).json({ error: "Parameter 'value' for 'track' must be an alphanumeric target identifier." });
+      }
+    }
+
     const io = req.app.get('io');
 
     if (io) {
-      if (command === 'record') {
-        io.emit('camera_update', { recording: Boolean(value) });
+      if (cleanCommand === 'record') {
+        io.emit('camera_update', { recording: Boolean(sanitizedValue) });
       }
-      io.emit('camera_command', { command, value });
+      io.emit('camera_command', { command: cleanCommand, value: sanitizedValue });
     }
 
-    res.json({ message: `Camera command executed: ${command}` });
+    res.json({ message: `Camera command executed: ${cleanCommand}` });
   } catch (err) {
     console.error('Error in /api/camera/command:', err);
     res.status(500).json({ error: 'Failed to execute camera command' });
