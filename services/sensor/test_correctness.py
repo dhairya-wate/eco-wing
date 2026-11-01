@@ -255,18 +255,23 @@ def test_worker_frame_rate_cap_respects_max_fps():
 
 
 
-def test_staleness_flag_lifecycle_and_worker_running():
+def test_staleness_flag_lifecycle_and_worker_running(monkeypatch):
     """
+    Stale flag lifecycle verified with real elapsed time.
     Stale flag becomes true when the worker is stopped past the threshold,
     and false when it is running.
     Verifies that:
     1. 'timestamp' is restored to its original type: Unix float.
     2. 'timestamp_iso' provides the ISO 8601 UTC string.
-    3. 'age_seconds' is a non-negative float.
+    3. 'age_seconds' is a non-negative float measured via real elapsed time.
     4. 'stale' is a boolean reflecting DETECTION_STALE_AFTER_SECONDS threshold.
     5. /api/system_info includes 'worker_running' boolean.
+    6. Verifies state transitions using real elapsed clock time rather than manually mutating worker timestamps.
     """
     with TestClient(app) as client:
+        # Use a short staleness threshold for real elapsed time verification
+        monkeypatch.setattr("app.DETECTION_STALE_AFTER_SECONDS", 0.3)
+
         # 1. Running state: stale is False, age_seconds is low
         worker.start()
         time.sleep(0.15)
@@ -287,32 +292,37 @@ def test_staleness_flag_lifecycle_and_worker_running():
         assert "stale" in body
         assert isinstance(body["stale"], bool)
         assert body["stale"] is False
-        assert body["age_seconds"] < 5.0
+        assert body["age_seconds"] < 0.3
 
         # System info worker_running check
         res_info = client.get("/api/system_info", headers={"X-Operator-Token": TEST_OPERATOR_TOKEN})
         assert res_info.status_code == 200
         assert res_info.json()["worker_running"] is True
 
-        # 2. Stopped state past threshold: stale becomes True
+        # 2. Stopped state past threshold: stale becomes True via real elapsed time
         worker.stop()
-        # Set last_update_time 10 seconds into the past
-        with worker.lock:
-            worker.last_update_time = time.time() - 10.0
+        # Wait for real elapsed time to exceed the 0.3s staleness threshold
+        time.sleep(0.35)
 
         res_stopped = client.get("/api/detections")
         assert res_stopped.status_code == 200
         stale_body = res_stopped.json()
         assert stale_body["stale"] is True
-        assert stale_body["age_seconds"] >= 10.0
+        assert stale_body["age_seconds"] >= 0.35
         assert isinstance(stale_body["timestamp"], float)
         assert isinstance(stale_body["timestamp_iso"], str)
 
         res_info_stopped = client.get("/api/system_info", headers={"X-Operator-Token": TEST_OPERATOR_TOKEN})
         assert res_info_stopped.json()["worker_running"] is False
 
-        # Resume worker for clean teardown
+        # 3. Resume worker and confirm it returns to fresh (stale is False) via real inference
         worker.start()
+        time.sleep(0.2)
+        res_resumed = client.get("/api/detections")
+        assert res_resumed.status_code == 200
+        resumed_body = res_resumed.json()
+        assert resumed_body["stale"] is False
+        assert resumed_body["age_seconds"] < 0.3
 
 
 
