@@ -4,12 +4,18 @@ import re
 import subprocess
 import pytest
 
-ECOWING_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+COMMAND_CENTER_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+REPO_ROOT = os.path.dirname(os.path.dirname(COMMAND_CENTER_DIR))
+ECOWING_DIR = COMMAND_CENTER_DIR
 
 def run_node_eval(code: str, env: dict = None) -> dict:
     """Executes Node snippet and parses JSON output."""
     full_env = os.environ.copy()
-    node_modules_path = os.path.join(ECOWING_DIR, "backend", "node_modules")
+    node_modules_path = (
+        os.path.join(COMMAND_CENTER_DIR, "node_modules")
+        if os.path.isdir(os.path.join(COMMAND_CENTER_DIR, "node_modules"))
+        else os.path.join(COMMAND_CENTER_DIR, "backend", "node_modules")
+    )
     full_env["NODE_PATH"] = node_modules_path
     if "ECOWING_OPERATOR_TOKEN" not in full_env:
         full_env["ECOWING_OPERATOR_TOKEN"] = "secure_test_operator_token_9xK2mP7qR4vL8wZ1"
@@ -17,7 +23,7 @@ def run_node_eval(code: str, env: dict = None) -> dict:
         full_env.update(env)
     res = subprocess.run(
         ["node", "-e", code],
-        cwd=ECOWING_DIR,
+        cwd=COMMAND_CENTER_DIR,
         capture_output=True,
         text=True,
         env=full_env,
@@ -34,7 +40,7 @@ def test_default_allowlist_is_empty_and_rejects_192_168_1_50():
     code = """
     (async () => {
         delete process.env.DRONE_TARGET_ALLOWLIST;
-        const { validateTarget } = require('./backend/routes/drone');
+        const { validateTarget } = require('./src/routes/drone');
         const res1 = await validateTarget('192.168.1.50');
         console.log(JSON.stringify(res1));
         process.exit(0);
@@ -49,7 +55,7 @@ def test_bypass_user_info_spoofing_rejected():
     """URLs with user-info tricks (e.g. http://localhost@evil.com) are rejected."""
     code = """
     (async () => {
-        const { validateTarget } = require('./backend/routes/drone');
+        const { validateTarget } = require('./src/routes/drone');
         const res = await validateTarget('http://localhost@evil.com/stream');
         console.log(JSON.stringify(res));
         process.exit(0);
@@ -63,7 +69,7 @@ def test_bypass_ipv6_bracketed_rejected_when_not_in_allowlist():
     """IPv6 addresses like [::1] are rejected when not explicitly allowlisted."""
     code = """
     (async () => {
-        const { validateTarget } = require('./backend/routes/drone');
+        const { validateTarget } = require('./src/routes/drone');
         const res = await validateTarget('http://[::1]:5000/video_feed');
         console.log(JSON.stringify(res));
         process.exit(0);
@@ -78,7 +84,7 @@ def test_bypass_decimal_ipv4_rejected():
     """Decimal representations of IPv4 (e.g. 2130706433 for 127.0.0.1) are rejected."""
     code = """
     (async () => {
-        const { validateTarget } = require('./backend/routes/drone');
+        const { validateTarget } = require('./src/routes/drone');
         const res = await validateTarget('http://2130706433:5000/feed');
         console.log(JSON.stringify(res));
         process.exit(0);
@@ -92,7 +98,7 @@ def test_bypass_shortened_ipv4_rejected():
     """Shortened IPv4 representations (e.g. 127.1) are rejected."""
     code = """
     (async () => {
-        const { validateTarget } = require('./backend/routes/drone');
+        const { validateTarget } = require('./src/routes/drone');
         const res = await validateTarget('http://127.1:5000/feed');
         console.log(JSON.stringify(res));
         process.exit(0);
@@ -106,7 +112,7 @@ def test_bypass_octal_ipv4_rejected():
     """Octal IPv4 representations (e.g. 0177.0.0.1) are rejected."""
     code = """
     (async () => {
-        const { validateTarget } = require('./backend/routes/drone');
+        const { validateTarget } = require('./src/routes/drone');
         const res = await validateTarget('http://0177.0.0.1:5000/feed');
         console.log(JSON.stringify(res));
         process.exit(0);
@@ -158,7 +164,7 @@ def test_operator_token_protection_on_drone_connect():
     process.env.ECOWING_OPERATOR_TOKEN = 'secret_test_operator_token_32_chars_123';
     process.env.DRONE_TARGET_ALLOWLIST = 'allowed.drone.lan,192.0.2.10';
 
-    const droneRouter = require('./backend/routes/drone');
+    const droneRouter = require('./src/routes/drone');
     const app = express();
     app.use(express.json());
     app.use('/api/drone', droneRouter);
@@ -238,7 +244,7 @@ def test_drone_connect_endpoint_rejects_http_redirect():
         process.env.ECOWING_OPERATOR_TOKEN = 'secret_test_operator_token_32_chars_123';
         process.env.DRONE_TARGET_ALLOWLIST = '127.0.0.1';
 
-        const droneRouter = require('./backend/routes/drone');
+        const droneRouter = require('./src/routes/drone');
         const apiApp = express();
         apiApp.use(express.json());
         apiApp.use('/api/drone', droneRouter);
@@ -281,7 +287,7 @@ def test_drone_connect_endpoint_rejects_http_redirect():
 def test_ecowing_operator_token_startup_validation():
     """Validates that ECOWING_OPERATOR_TOKEN satisfies entropy, length >= 32, and pattern checks."""
     code = """
-    const { validateOperatorTokenConfig } = require('./backend/middleware/auth');
+    const { validateOperatorTokenConfig } = require('./src/middleware/auth');
     const results = {};
 
     // 1. Unset/empty token
@@ -344,7 +350,7 @@ def test_dns_rebinding_rejected_with_resolver_stub():
     code = """
     (async () => {
         process.env.DRONE_TARGET_ALLOWLIST = 'camera.drone.lan,192.0.2.10';
-        const { validateTarget } = require('./backend/routes/drone');
+        const { validateTarget } = require('./src/routes/drone');
 
         // Stub A: resolves to unauthorized IP (192.0.2.99 not in allowlist) -> REBINDING DETECTED!
         const evilResolver = async (host) => {
@@ -389,7 +395,7 @@ def test_command_routes_operator_auth_and_401():
     const http = require('http');
     process.env.ECOWING_OPERATOR_TOKEN = 'secure_test_operator_token_9xK2mP7qR4vL8wZ1';
 
-    const { router: apiRouter } = require('./backend/routes/api');
+    const { router: apiRouter } = require('./src/routes/api');
     const app = express();
     app.use(express.json());
     app.use('/api', apiRouter);
@@ -463,7 +469,7 @@ def test_e1_command_injection_and_parameter_validation():
     const http = require('http');
     process.env.ECOWING_OPERATOR_TOKEN = 'secure_test_operator_token_9xK2mP7qR4vL8wZ1';
 
-    const { router: apiRouter } = require('./backend/routes/api');
+    const { router: apiRouter } = require('./src/routes/api');
     const app = express();
     app.use(express.json());
     app.use('/api', apiRouter);
@@ -542,7 +548,7 @@ def test_e2_telemetry_coordinate_battery_validation():
         'Drone-01': 'test_drone_token_1234567890123456',
         'Drone-01$(reboot)': 'test_drone_token_1234567890123456'
     });
-    const droneRouter = require('./backend/routes/drone');
+    const droneRouter = require('./src/routes/drone');
     const app = express();
     app.use(express.json());
     app.use('/api/drone', droneRouter);
@@ -622,7 +628,7 @@ def test_https_drone_target_rejected():
     """HTTPS targets for LAN drone stream devices are strictly rejected."""
     code = """
     (async () => {
-        const { validateTarget } = require('./backend/routes/drone');
+        const { validateTarget } = require('./src/routes/drone');
         const res = await validateTarget('https://192.0.2.10:8080/stream');
         console.log(JSON.stringify(res));
         process.exit(0);
@@ -651,7 +657,7 @@ def test_drone_ingestion_device_token_auth_and_cross_drone_rejection():
         'drone-beta': 'token_beta_12345678901234567890'
     });
 
-    const droneRouter = require('./backend/routes/drone');
+    const droneRouter = require('./src/routes/drone');
     const app = express();
     app.use(express.json());
     app.use('/api/drone', droneRouter);
@@ -747,7 +753,7 @@ def test_purge_and_export_operator_auth_and_401():
     const http = require('http');
 
     process.env.ECOWING_OPERATOR_TOKEN = 'secure_test_operator_token_9xK2mP7qR4vL8wZ1';
-    const { router: apiRouter } = require('./backend/routes/api');
+    const { router: apiRouter } = require('./src/routes/api');
     const app = express();
     app.use(express.json());
     app.use('/api', apiRouter);
@@ -803,7 +809,7 @@ def test_purge_and_export_operator_auth_and_401():
 def test_mongo_uri_credential_validation():
     """Startup check: MONGO_URI must include credentials (user:password@)."""
     code = """
-    const { validateMongoUriConfig } = require('./backend/app');
+    const { validateMongoUriConfig } = require('./src/app');
     let errUncredentialed = null;
     let errEmpty = null;
     try {
@@ -834,8 +840,8 @@ def test_e_new1_cors_origin_allowlist():
     """E-NEW1: Restrict CORS to configured origin allowlist (wildcard * is strictly rejected, unauthorized origins rejected with 403)."""
     code = """
     const http = require('http');
-    const app = require('./backend/app');
-    const { allowedOrigins } = require('./backend/app');
+    const app = require('./src/app');
+    const { allowedOrigins } = require('./src/app');
 
     const srv = http.createServer(app);
     srv.listen(0, '127.0.0.1', async () => {
@@ -890,7 +896,7 @@ def test_socket_io_drone_events_require_device_token():
         'drone-alpha': 'token_alpha_12345678901234567890',
         'drone-beta': 'token_beta_12345678901234567890'
     });
-    const { verifySocketDroneAuth } = require('./backend/server');
+    const { verifySocketDroneAuth } = require('./src/server');
 
     // 1. Missing token -> rejected
     const r1 = verifySocketDroneAuth({ droneId: null }, { drone_id: 'drone-alpha' });
@@ -925,7 +931,7 @@ def test_video_feed_operator_auth_gate():
     const express = require('express');
     const http = require('http');
     process.env.ECOWING_OPERATOR_TOKEN = 'secure_test_operator_token_9xK2mP7qR4vL8wZ1';
-    const app = require('./backend/app');
+    const app = require('./src/app');
 
     const srv = http.createServer(app);
     srv.listen(0, '127.0.0.1', async () => {
@@ -1081,7 +1087,7 @@ def test_detection_ingestion_canonical_schema_validation_and_rejection():
         'drone-alpha': 'token_alpha_12345678901234567890'
     });
 
-    const droneRouter = require('./backend/routes/drone');
+    const droneRouter = require('./src/routes/drone');
     const app = express();
     app.use(express.json());
     app.use('/api/drone', droneRouter);
@@ -1198,8 +1204,8 @@ def test_i1_detection_ingestion_idempotency_and_outbox_contract():
         'drone-alpha': 'token_alpha_12345678901234567890'
     });
 
-    const droneRouter = require('./backend/routes/drone');
-    const detectionStore = require('./backend/detectionStore');
+    const droneRouter = require('./src/routes/drone');
+    const detectionStore = require('./src/detectionStore');
     const app = express();
     app.use(express.json());
     app.use('/api/drone', droneRouter);
@@ -1282,8 +1288,8 @@ def test_e9_physical_drone_safety_controls_and_state_machine():
 
     process.env.ECOWING_OPERATOR_TOKEN = 'secure_test_operator_token_9xK2mP7qR4vL8wZ1';
 
-    const { router: apiRouter } = require('./backend/routes/api');
-    const { commandManager } = require('./backend/services/commandManager');
+    const { router: apiRouter } = require('./src/routes/api');
+    const { commandManager } = require('./src/services/commandManager');
 
     const app = express();
     app.use(express.json());
@@ -1431,7 +1437,7 @@ def test_e9_physical_drone_safety_controls_and_state_machine():
 
 def test_e8_telemetry_ttl_index_configuration():
     code = """
-    const Telemetry = require('./backend/models/Telemetry');
+    const Telemetry = require('./src/models/Telemetry');
     const indexes = Telemetry.schema.indexes();
     const ttlIndex = indexes.find(entry => entry[0] && entry[0].timestamp === 1 && typeof entry[1].expireAfterSeconds === 'number');
     console.log(JSON.stringify({
@@ -1448,8 +1454,8 @@ def test_e8_telemetry_ttl_index_configuration():
 def test_e7_payload_size_limit_and_ingestion_rate_limiting():
     code = """
     const http = require('http');
-    const app = require('./backend/app');
-    const { createRateLimiter } = require('./backend/middleware/rateLimiter');
+    const app = require('./src/app');
+    const { createRateLimiter } = require('./src/middleware/rateLimiter');
 
     const srv = http.createServer(app);
     srv.listen(0, '127.0.0.1', async () => {
@@ -1509,13 +1515,21 @@ def test_e7_payload_size_limit_and_ingestion_rate_limiting():
 def test_e10_e11_docker_compose_and_node_engine_hardening():
     """E10 & E11: Compose healthchecks, pinned MongoDB image, --auth flag, and declared Node engine."""
     import json
-    pkg_path = os.path.join(ECOWING_DIR, "backend", "package.json")
+    pkg_candidates = [
+        os.path.join(COMMAND_CENTER_DIR, "package.json"),
+        os.path.join(COMMAND_CENTER_DIR, "backend", "package.json")
+    ]
+    pkg_path = next((p for p in pkg_candidates if os.path.isfile(p)), pkg_candidates[0])
     with open(pkg_path, "r", encoding="utf-8") as f:
         pkg = json.load(f)
     assert "engines" in pkg
     assert pkg["engines"]["node"] == ">=20.0.0"
 
-    compose_path = os.path.join(ECOWING_DIR, "docker-compose.yml")
+    compose_candidates = [
+        os.path.join(REPO_ROOT, "docker-compose.yml"),
+        os.path.join(COMMAND_CENTER_DIR, "docker-compose.yml")
+    ]
+    compose_path = next((p for p in compose_candidates if os.path.isfile(p)), compose_candidates[0])
     with open(compose_path, "r", encoding="utf-8") as f:
         compose_content = f.read()
 
@@ -1528,8 +1542,8 @@ def test_op3_trusted_proxy_topology_and_spoofing_prevention():
     """OP-3: X-Forwarded-For is ignored by default; only exact trusted proxy IP is accepted."""
     code = """
     const http = require('http');
-    const app = require('./backend/app');
-    const { isTrustedProxy, trustedProxySet } = require('./backend/app');
+    const app = require('./src/app');
+    const { isTrustedProxy, trustedProxySet } = require('./src/app');
 
     trustedProxySet.clear(); // Default: empty (untrusted)
     const srv = http.createServer(app);
@@ -1565,7 +1579,12 @@ def test_op3_trusted_proxy_topology_and_spoofing_prevention():
 
 def test_op2_nginx_reverse_proxy_topology_and_video_gate():
     """OP-2: Nginx configuration asserts client_max_body_size 5m, video gate 401, and streaming timeouts."""
-    nginx_path = os.path.join(ECOWING_DIR, "nginx.conf")
+    nginx_candidates = [
+        os.path.join(REPO_ROOT, "deploy", "nginx", "nginx.conf"),
+        os.path.join(REPO_ROOT, "nginx.conf"),
+        os.path.join(COMMAND_CENTER_DIR, "nginx.conf")
+    ]
+    nginx_path = next((p for p in nginx_candidates if os.path.isfile(p)), nginx_candidates[0])
     with open(nginx_path, "r", encoding="utf-8") as f:
         conf = f.read()
 
@@ -1582,7 +1601,11 @@ def test_e13_governance_env_example_license_and_ci_workflow():
     """
     E13: Verifies that root .env.example, LICENSE, and GitHub Actions CI workflow exist and are valid.
     """
-    root_env = os.path.join(ECOWING_DIR, ".env.example")
+    root_env_candidates = [
+        os.path.join(REPO_ROOT, ".env.example"),
+        os.path.join(COMMAND_CENTER_DIR, ".env.example")
+    ]
+    root_env = next((p for p in root_env_candidates if os.path.isfile(p)), root_env_candidates[0])
     assert os.path.isfile(root_env), "Root .env.example must exist"
     with open(root_env, "r", encoding="utf-8") as f:
         env_content = f.read()
@@ -1590,10 +1613,10 @@ def test_e13_governance_env_example_license_and_ci_workflow():
     assert "MONGO_URI=" in env_content
     assert "DRONE_DEVICE_TOKENS=" in env_content
 
-    license_path = os.path.join(ECOWING_DIR, "LICENSE")
+    license_path = os.path.join(REPO_ROOT, "LICENSE")
     assert not os.path.exists(license_path), "Root LICENSE must not exist" 
 
-    ci_workflow = os.path.join(ECOWING_DIR, ".github", "workflows", "ci.yml")
+    ci_workflow = os.path.join(REPO_ROOT, ".github", "workflows", "ci.yml")
     assert os.path.isfile(ci_workflow), ".github/workflows/ci.yml must exist"
     with open(ci_workflow, "r", encoding="utf-8") as f:
         ci_content = f.read()
@@ -1606,7 +1629,11 @@ def test_e12_readme_run_paths_and_proxy_architecture():
     E12 / OP-SHARED-LOCKOUT: Verifies that README.md documents consistent run paths
     routing through Nginx port 8080, local dev run paths, and shared NAT lockout handling.
     """
-    readme_path = os.path.join(ECOWING_DIR, "README.md")
+    readme_candidates = [
+        os.path.join(COMMAND_CENTER_DIR, "README.md"),
+        os.path.join(REPO_ROOT, "README.md")
+    ]
+    readme_path = next((p for p in readme_candidates if os.path.isfile(p)), readme_candidates[0])
     assert os.path.isfile(readme_path), "EcoWing README.md must exist"
     with open(readme_path, "r", encoding="utf-8") as f:
         text = f.read()

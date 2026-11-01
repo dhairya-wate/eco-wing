@@ -18,9 +18,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   - `services/sensor/tests/` split into `unit/`, `integration/`, `contract/`
 
 ### Changed
-- Relocated services to dedicated monorepo paths:
-  - EcoWing backend moved to `services/command-center/`
-  - Detection sensor moved to `services/sensor/`
+- Relocated services to dedicated monorepo paths matching target canonical tree:
+  - EcoWing backend restructured to `services/command-center/` (`src/`, `test/`, `package.json`, `package-lock.json`, `Dockerfile`, `.env.example`).
+  - Detection sensor restructured to `services/sensor/` (`src/ecowing_sensor/`, `tests/`, `pyproject.toml`, `requirements.lock`, `Dockerfile`, `.env.example`).
+- Relocated Docker Compose orchestrator to root `docker-compose.yml`.
+- Relocated model assets to root `models/` (`yolo26n.pt`, `README.md`).
+- Added root utility scripts in `tools/` (`validate_contracts.py`, `fetch_model.py`).
+- Flattened and organized architecture docs in `docs/` (`architecture.md`, `operations.md`, `open-items.md`, `CONTRACT.md`, `adr/`).
+- Moved deployment configuration to `deploy/nginx/` (`nginx.conf`).
+- Consolidated dashboard entry point in `dashboard/index.html`.
 - Updated test runners to resolve contracts from root `contracts/` directory.
 - Relocated `api/index.js` (Vercel entrypoint) to `demo/index.js` with static preview README.
 

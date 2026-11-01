@@ -7,8 +7,9 @@ from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
 # Base Paths
-BASE_DIR = Path(__file__).resolve().parent
-MODEL_PATH = BASE_DIR / "yolo26n.pt"
+BASE_DIR = Path(__file__).resolve().parents[2]
+REPO_ROOT = Path(__file__).resolve().parents[4]
+MODEL_PATH = REPO_ROOT / "models" / "yolo26n.pt" if (REPO_ROOT / "models" / "yolo26n.pt").exists() else BASE_DIR / "yolo26n.pt"
 SAMPLE_DIR = BASE_DIR / "test_samples"
 
 # Security & Operator Authentication

@@ -14,7 +14,7 @@ process.env.DRONE_DEVICE_TOKENS = JSON.stringify({
 
 const rootDir = path.resolve(__dirname, '../../..');
 
-const { CommandManager } = require('../../services/commandManager');
+const { CommandManager } = require('../../src/services/commandManager');
 test('Drone Safety Command Manager & State Machine (E9)', async (t) => {
   const cm = new CommandManager();
 

@@ -14,18 +14,18 @@ process.env.DRONE_DEVICE_TOKENS = JSON.stringify({
 
 const rootDir = path.resolve(__dirname, '../../..');
 
-const { createRateLimiter } = require('../../middleware/rateLimiter');
-const Telemetry = require('../../models/Telemetry');
+const { createRateLimiter } = require('../../src/middleware/rateLimiter');
+const Telemetry = require('../../src/models/Telemetry');
 const {
   validateOperatorTokenConfig,
   verifyOperatorToken,
   verifyDroneToken,
   constantTimeCompare,
   getExpectedDroneToken
-} = require('../../middleware/auth');
-const { validateTarget } = require('../../routes/drone');
-const { validateMongoUriConfig, allowedOrigins } = require('../../app');
-const { verifySocketDroneAuth } = require('../../server');
+} = require('../../src/middleware/auth');
+const { validateTarget } = require('../../src/routes/drone');
+const { validateMongoUriConfig, allowedOrigins } = require('../../src/app');
+const { verifySocketDroneAuth } = require('../../src/server');
 test('Operator Token Configuration Validation', async (t) => {
   await t.test('fails when operator token is empty', () => {
     assert.throws(() => validateOperatorTokenConfig(''), /is not set/);
@@ -99,7 +99,7 @@ test('CORS Allowlist Validation (E-NEW1)', async (t) => {
 
   await t.test('HTTP requests with unauthorized Origin are rejected with 403 and no CORS header', async () => {
     const http = require('http');
-    const app = require('../../app');
+    const app = require('../../src/app');
     const srv = http.createServer(app);
     await new Promise(r => srv.listen(0, '127.0.0.1', r));
     const port = srv.address().port;
@@ -359,7 +359,9 @@ test('Infrastructure & Compose Hardening (E10, E11)', async (t) => {
   });
 
   await t.test('docker-compose.yml pins mongo image, adds --auth flag, and specifies service_healthy healthcheck', () => {
-    const composeContent = fs.readFileSync(path.join(__dirname, '..', '..', '..', 'docker-compose.yml'), 'utf-8');
+    const composeCandidate = path.resolve(__dirname, '../../../..', 'docker-compose.yml');
+    const composePath = fs.existsSync(composeCandidate) ? composeCandidate : path.resolve(__dirname, '../../..', 'docker-compose.yml');
+    const composeContent = fs.readFileSync(composePath, 'utf-8');
     assert.match(composeContent, /image:\s*mongo:7\.0\.14-jammy/, 'MongoDB image must be pinned');
     assert.match(composeContent, /command:\s*\["--auth"\]/, 'MongoDB must run with --auth command flag');
     assert.match(composeContent, /healthcheck:/, 'MongoDB must have healthcheck');
@@ -370,11 +372,14 @@ test('Infrastructure & Compose Hardening (E10, E11)', async (t) => {
 test('Root Governance & CI Pipelines (E13)', async (t) => {
   const fs = require('fs');
   const path = require('path');
-  const rootDir = path.join(__dirname, '..', '..', '..');
+  const serviceDir = path.resolve(__dirname, '../..');
+  const rootCandidate = path.resolve(__dirname, '../../..');
+  const rootDir = fs.existsSync(path.join(rootCandidate, 'SECURITY.md')) ? rootCandidate : serviceDir;
 
   await t.test('root .env.example exists and contains required environment keys', () => {
-    const envExamplePath = path.join(rootDir, '.env.example');
-    assert.ok(fs.existsSync(envExamplePath), '.env.example must exist in repository root');
+    const envCandidate = path.join(rootDir, '.env.example');
+    const envExamplePath = fs.existsSync(envCandidate) ? envCandidate : path.join(serviceDir, '.env.example');
+    assert.ok(fs.existsSync(envExamplePath), '.env.example must exist in repository root or service root');
     const content = fs.readFileSync(envExamplePath, 'utf-8');
     assert.match(content, /ECOWING_OPERATOR_TOKEN=/);
     assert.match(content, /MONGO_URI=/);
@@ -397,8 +402,8 @@ test('Root Governance & CI Pipelines (E13)', async (t) => {
 
 test('Trusted Proxy Topology & IP Extraction (OP-3)', async (t) => {
   const http = require('http');
-  const app = require('../../app');
-  const { isTrustedProxy, trustedProxySet } = require('../../app');
+  const app = require('../../src/app');
+  const { isTrustedProxy, trustedProxySet } = require('../../src/app');
 
   await t.test('default trustedProxySet is empty, rejecting X-Forwarded-For spoofing', async () => {
     trustedProxySet.clear();
@@ -433,7 +438,9 @@ test('Trusted Proxy Topology & IP Extraction (OP-3)', async (t) => {
 test('Nginx Reverse Proxy Configuration & Video Feed Gate (OP-2)', async (t) => {
   const fs = require('fs');
   const path = require('path');
-  const nginxConf = fs.readFileSync(path.join(__dirname, '..', '..', '..', 'nginx.conf'), 'utf-8');
+  const nginxCandidate = path.resolve(__dirname, '../../../../deploy/nginx/nginx.conf');
+  const nginxPath = fs.existsSync(nginxCandidate) ? nginxCandidate : path.resolve(__dirname, '../../../nginx.conf');
+  const nginxConf = fs.readFileSync(nginxPath, 'utf-8');
 
   await t.test('nginx.conf defines client_max_body_size 5m', () => {
     assert.match(nginxConf, /client_max_body_size\s+5m;/);

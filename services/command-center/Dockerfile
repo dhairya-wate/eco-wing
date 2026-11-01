@@ -1,13 +1,13 @@
-FROM nginx:1.27-alpine
+FROM node:20-alpine
 
-# Remove the default site and install the EcoWing config
-RUN rm -f /etc/nginx/conf.d/default.conf
-COPY nginx.conf /etc/nginx/templates/default.conf.template
-COPY index.html config.js /usr/share/nginx/html/
+WORKDIR /app
 
-ENV BACKEND_HOST=backend BACKEND_PORT=3000
+COPY package*.json ./
+RUN npm install --production
 
-EXPOSE 8080
+COPY . .
 
-HEALTHCHECK --interval=30s --timeout=3s --retries=3 \
-  CMD wget -qO- http://127.0.0.1:8080/index.html >/dev/null || exit 1
+EXPOSE 3000
+
+CMD ["node", "server.js"]
+

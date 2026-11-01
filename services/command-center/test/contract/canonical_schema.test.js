@@ -17,10 +17,10 @@ const rootDir = path.resolve(__dirname, '../../..');
 const {
   validateCanonicalDetectionEvent,
   validateDetectionPayload
-} = require('../../validators/detectionValidator');
-const detectionStore = require('../../detectionStore');
+} = require('../../src/validators/detectionValidator');
+const detectionStore = require('../../src/detectionStore');
 const express = require('express');
-const droneRoutes = require('../../routes/drone');
+const droneRoutes = require('../../src/routes/drone');
 const crypto = require('crypto');
 test('Canonical Detection Event Schema Validation', async (t) => {
   const validEvent = {
@@ -146,7 +146,7 @@ test('Canonical Detection Event Schema Validation', async (t) => {
   await t.test('POST /api/drone/detection endpoint is strictly idempotent on duplicate event_id', async () => {
     const express = require('express');
     const http = require('http');
-    const droneRouter = require('../../routes/drone');
+    const droneRouter = require('../../src/routes/drone');
     const testApp = express();
     testApp.use(express.json());
     testApp.use('/api/drone', droneRouter);
@@ -208,5 +208,5 @@ test('Canonical Detection Event Schema Validation', async (t) => {
   });
 });
 
-const { CommandManager } = require('../../services/commandManager');
+const { CommandManager } = require('../../src/services/commandManager');
 
