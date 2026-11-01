@@ -974,12 +974,20 @@ def test_contract_schemas_and_command_state_machine_validation():
     import jsonschema
     from pathlib import Path
 
-    contracts_dir = Path(ECOWING_DIR) / "contracts"
+    contracts_dir = Path(ECOWING_DIR).parent.parent / "contracts"
     if not contracts_dir.exists():
-        contracts_dir = Path(ECOWING_DIR).parent.parent / "contracts"
+        contracts_dir = Path(ECOWING_DIR) / "contracts"
 
-    det_schema_path = contracts_dir / "detection-event.schema.json"
-    cmd_schema_path = contracts_dir / "command.schema.json"
+    det_schema_path = (
+        contracts_dir / "schemas" / "detection-event.schema.json"
+        if (contracts_dir / "schemas" / "detection-event.schema.json").exists()
+        else contracts_dir / "detection-event.schema.json"
+    )
+    cmd_schema_path = (
+        contracts_dir / "schemas" / "command.schema.json"
+        if (contracts_dir / "schemas" / "command.schema.json").exists()
+        else contracts_dir / "command.schema.json"
+    )
     tax_path = contracts_dir / "taxonomy.yaml"
 
     assert det_schema_path.exists(), f"{det_schema_path} missing"

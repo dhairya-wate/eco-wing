@@ -15,19 +15,27 @@ def test_contract_schema_and_taxonomy_validation():
     - A payload with an unknown class_id fails schema validation.
     """
     candidates = [
+        Path(__file__).resolve().parents[4] / "contracts",
         Path(__file__).resolve().parents[2] / "contracts",
         Path(__file__).resolve().parents[3] / "contracts",
         Path(__file__).resolve().parent.parent / "contracts",
     ]
     contracts_dir = None
     for cand in candidates:
-        if (cand / "taxonomy.yaml").exists() and (cand / "detection-event.schema.json").exists():
+        if (cand / "taxonomy.yaml").exists() and (
+            (cand / "schemas" / "detection-event.schema.json").exists()
+            or (cand / "detection-event.schema.json").exists()
+        ):
             contracts_dir = cand
             break
 
     assert contracts_dir is not None, f"Could not find contracts directory among candidates: {candidates}"
     taxonomy_file = contracts_dir / "taxonomy.yaml"
-    schema_file = contracts_dir / "detection-event.schema.json"
+    schema_file = (
+        contracts_dir / "schemas" / "detection-event.schema.json"
+        if (contracts_dir / "schemas" / "detection-event.schema.json").exists()
+        else contracts_dir / "detection-event.schema.json"
+    )
 
     assert taxonomy_file.exists(), f"Taxonomy file {taxonomy_file} does not exist"
     assert schema_file.exists(), f"Schema file {schema_file} does not exist"

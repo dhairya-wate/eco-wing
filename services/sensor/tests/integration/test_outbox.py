@@ -56,6 +56,8 @@ class MockEcoWingHandler(BaseHTTPRequestHandler):
 
 def test_outbox_queue_and_schema_validation(tmp_path):
     schema_path = BASE_DIR / "contracts" / "detection-event.schema.json"
+    if not schema_path.exists():
+        schema_path = BASE_DIR.parent.parent / "contracts" / "schemas" / "detection-event.schema.json"
     with open(schema_path, "r", encoding="utf-8") as f:
         schema = json.load(f)
 
