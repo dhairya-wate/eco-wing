@@ -1,0 +1,18 @@
+# Global default owners
+* @ecowing-maintainers
+
+# Contracts (single source of truth)
+/contracts/ @ecowing-contract-owners
+
+# Command Center Service
+/services/command-center/ @ecowing-backend-team
+
+# Sensor Service
+/services/sensor/ @ecowing-sensor-team
+
+# Deployment & Operations
+/deploy/ @ecowing-devops-team
+
+# Governance & Documentation
+/docs/ @ecowing-maintainers
+SECURITY.md @ecowing-security-team
