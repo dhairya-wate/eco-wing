@@ -394,6 +394,28 @@ def test_settings_confidence_contract_accepts_unit_float_and_rejects_percentage(
         res_high = client.post("/api/settings", headers=headers, json={"confidence": 1.5})
         assert res_high.status_code == 400
 
+        # 5. Non-finite values: NaN, inf, -inf -> 400 Bad Request
+        res_nan = client.post(
+            "/api/settings",
+            headers={**headers, "Content-Type": "application/json"},
+            content=b'{"confidence": NaN}'
+        )
+        assert res_nan.status_code == 400
+
+        res_inf = client.post(
+            "/api/settings",
+            headers={**headers, "Content-Type": "application/json"},
+            content=b'{"confidence": Infinity}'
+        )
+        assert res_inf.status_code == 400
+
+        res_neginf = client.post(
+            "/api/settings",
+            headers={**headers, "Content-Type": "application/json"},
+            content=b'{"confidence": -Infinity}'
+        )
+        assert res_neginf.status_code == 400
+
         # Restore default confidence
         detector.set_confidence(0.35)
 

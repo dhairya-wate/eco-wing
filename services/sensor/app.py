@@ -16,9 +16,10 @@ import base64
 import secrets
 import logging
 import ipaddress
+import math
 from pathlib import Path
 import hmac
-from typing import Optional
+from typing import Optional, Any
 
 logger = logging.getLogger("ecowing.detection")
 
@@ -284,7 +285,7 @@ def prune_stale_records(now: Optional[float] = None) -> None:
             ip_failed_exchange_attempts.pop(ip, None)
 
 class SettingsRequest(BaseModel):
-    confidence: Optional[float] = None
+    confidence: Optional[Any] = None
     source: Optional[str] = None
 
 class CodeExchangeRequest(BaseModel):
@@ -361,12 +362,19 @@ def get_system_info():
 def update_settings(payload: SettingsRequest):
     """Dynamically adjusts confidence threshold or video source (Operator Protected)."""
     if payload.confidence is not None:
-        if payload.confidence < 0.0 or payload.confidence > 1.0:
+        try:
+            val = float(payload.confidence)
+        except (ValueError, TypeError):
             raise HTTPException(
                 status_code=400,
-                detail="Confidence threshold must be a float between 0.0 and 1.0 (got percentage or out-of-range value)."
+                detail="Confidence threshold must be a finite float between 0.0 and 1.0."
             )
-        detector.set_confidence(payload.confidence)
+        if not math.isfinite(val) or val < 0.0 or val > 1.0:
+            raise HTTPException(
+                status_code=400,
+                detail="Confidence threshold must be a finite float between 0.0 and 1.0 (got percentage, out-of-range, or non-finite value)."
+            )
+        detector.set_confidence(val)
     if payload.source is not None:
         stream_mgr.set_source(payload.source)
     return {
