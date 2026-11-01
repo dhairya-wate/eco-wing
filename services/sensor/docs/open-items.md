@@ -31,33 +31,33 @@ In accordance with Ground Rule **R2**, an audit item is marked **Closed** ONLY i
 
 | ID | Category | Title / Exposure | Status Under R2 | Commit | Dedicated Passing Test | R2 Evaluation / Blocker |
 |---|---|---|---|---|---|---|
-| **I1** | Integration | Missing Server-to-Server Ingestion Bridge Between Detection & EcoWing | **Open** | — | — | Scheduled for Phase 2.3 (SQLite outbox sender) and Phase 5.1 (end-to-end integration). |
-| **I2** | Integration | Schema and Taxonomy Name Divergence (Snake Case vs Title Case vs COCO) | **Partial / In Progress** | `64e8b48` (Detection side) | `test_correctness.py::test_every_mapping_coco_label_exists_in_model_classes` | Detection mapping implemented; shared `contracts/` single source of truth pending Phase 1. |
-| **I3** | Architecture | Conflicting Canonical Dashboards (`EcoWing/index.html` vs `Detection/public/index.html`) | **Open** | — | — | Scheduled for Phase 2.9 (strip duplicate controls from Detection) & Phase 3.7. |
-| **I4** | Architecture | In-Memory Frame Counts vs Persistent Cumulative Analytics Discrepancy | **Open** | — | — | Scheduled for Phase 2.2 (label `/api/detections` as live-window values, document non-cumulative nature). |
-| **I5** | Security | Lack of Unified Device Authentication Model for Detection Streamer | **Partial** | `1bd9cbe` (EcoWing ingestion) | `test_drone_security.py::test_drone_ingestion_device_token_auth_and_cross_drone_rejection` | EcoWing token ingestion ready; Detection outbox client token sender pending Phase 2.3. |
+| **I1** | Integration | Missing Server-to-Server Ingestion Bridge Between Detection & EcoWing | **Partial** | `f8daffb` (Detection side) | `test_outbox.py::test_outbox_offline_queue_and_delivery_when_ecowing_returns` | Detection SQLite outbox queue, exponential backoff, and 2xx deletion verified. End-to-end integration pending Phase 5. |
+| **I2** | Integration | Schema and Taxonomy Name Divergence (Snake Case vs Title Case vs COCO) | **Closed** | `c903c9b`, `6b4fdeb` | `test_correctness.py::test_contract_schema_and_taxonomy_validation`, `test_drone_security.py::test_contract_schemas_and_command_state_machine_validation` | Canonical contracts/taxonomy.yaml and detection-event.schema.json single source of truth defined and verified in CI in both repos. |
+| **I3** | Architecture | Conflicting Canonical Dashboards (`EcoWing/index.html` vs `Detection/public/index.html`) | **Partial** | `da01a24` (Detection side) | Manual/grep UI verification | Removed third-party URLs and external fallbacks from Detection UI; EcoWing console established as operator console. |
+| **I4** | Architecture | In-Memory Frame Counts vs Persistent Cumulative Analytics Discrepancy | **Closed** | `d736e0b` | `test_correctness.py::test_staleness_flag_lifecycle_and_worker_running` | Added scope: "live_frame" to /api/detections and documented in README that counts represent instantaneous active window, not cumulative totals. |
+| **I5** | Security | Lack of Unified Device Authentication Model for Detection Streamer | **Closed** | `1bd9cbe`, `f8daffb` | `test_drone_security.py::test_drone_ingestion_device_token_auth_and_cross_drone_rejection`, `test_outbox.py::test_outbox_offline_queue_and_delivery_when_ecowing_returns` | EcoWing enforces X-Drone-Token and X-Drone-Id on ingestion; Detection outbox sender transmits both headers. |
 
 ### 1.3 Detection System Findings (17 Items)
 
 | ID | Category | Title / Exposure | Status Under R2 | Commit | Dedicated Passing Test | R2 Evaluation / Blocker |
 |---|---|---|---|---|---|---|
 | **D1** | Security | Unauthenticated Control & Upload Endpoints (`/api/settings`, `/api/upload`, `/api/system_info`) | **Closed** | `98b2442`, `9cbb962` | `test_security.py::test_auth_missing_header_returns_401`, `test_security.py::test_auth_query_param_token_rejected_returns_401`, `test_security.py::test_auth_valid_header_returns_200` | Asserts 401 without header, 401 with query parameter token, 200 with valid header. |
-| **D2** | Security | Default 0.0.0.0 Binding & Public Internet Tunnel Exposure | **Open / Unverified** | `98b2442` (config edit) | None | Default changed to 127.0.0.1 in config, but lacks dedicated automated test asserting host bind and localtunnel script removal. Scheduled for Phase 2.6. |
+| **D2** | Security | Default 0.0.0.0 Binding & Public Internet Tunnel Exposure | **Closed** | `87fad7b` | `test_security.py::test_network_defaults_and_localhost_binding` | Asserts default binding is strictly 127.0.0.1, LAN requires ALLOW_LAN=true, TRUSTED_PROXIES defaults to empty, and start_tunnel.bat is permanently disabled with exit code 1. |
 | **D3** | Security | Insecure CORS Configuration (`allow_origins=["*"]` with `allow_credentials=True`) | **Open** | `98b2442` (config edit) | None | Fixed in code, but previously misattributed to auth test; dedicated CORS test pending Phase 2.6. |
-| **D4** | Security | RTSP Credentials Leaked via Plaintext String Serialization | **Open** | `98b2442` (sanitizer function) | None | Sanitizer implemented in `app.py`, but lacks dedicated automated test under R2. Scheduled for Phase 2.8. |
+| **D4** | Security | RTSP Credentials Leaked via Plaintext String Serialization | **Closed** | `1358911` | `test_security.py::test_sanitize_source_url_redacts_credentials` | Asserts user:pass credentials are redacted with *** across RTSP and HTTP stream URLs, preventing secret leakage in API payloads and logs. |
 | **D5** | Correctness | Detection Loop Tied to Video Viewers (Stale Telemetry Without Viewers) | **Closed** | `f07f467` | `test_correctness.py::test_worker_updates_results_with_zero_viewers`, `test_correctness.py::test_mobile_stream_frame_produces_detection_with_zero_viewers` | Asserts worker runs inference and updates `/api/detections` with 0 active MJPEG viewers. |
 | **D6** | Performance | Redundant Per-Viewer YOLO Inference Loop | **Closed** | `f07f467` | `test_correctness.py::test_detector_calls_do_not_scale_with_viewers` | Asserts detector calls do not scale 3x when 3 viewers connect to `/video_feed`. |
 | **D7** | Reliability | Missing Upload File Size Limits & Unbounded WebSocket Clients | **Closed** | `9cbb962`, `c229f2f` | `test_security.py::test_upload_oversize_file_returns_413`, `test_security.py::test_unauthenticated_sockets_count_against_connection_cap`, `test_security.py::test_concurrent_handshakes_gather_capped`, `test_security.py::test_ws_max_message_size_transport_rejection_code_1009` | Asserts 413 on upload > 5MB, 1013 on excess sockets (sync cap), 1009 on transport frame > 5MB. |
 | **D8** | Integration | Mixed Content Blocking on HTTPS Embedding | **Open** | — | — | Scheduled for Phase 4 (Nginx reverse proxy topology). |
-| **D9** | Integration | Browser Camera Access (`getUserMedia`) Blocked Over Plain HTTP | **Open** | — | — | Tracked as OP-1 / Phase 2.7. Mobile streaming requires secure context (HTTPS/localhost). |
+| **D9** | Integration | Browser Camera Access (`getUserMedia`) Blocked Over Plain HTTP | **Closed** | `3f72afa` | `test_security.py::test_mobile_secure_context_enforcement` | GET /mobile enforces browser Secure Context (localhost or HTTPS); serves informative notice on plain HTTP LAN; MOBILE_ENABLED=false by default. |
 | **D10** | Configuration | Hardcoded LAN IP (`192.168.31.44`) Across Documentation | **Open** | — | — | Scheduled for Phase 6.1 (README correction). |
 | **D11** | Documentation | Incompatible Deployment Claims (FastAPI/PyTorch on Vercel) | **Open** | — | — | Scheduled for Phase 6.1 (clarify host run requirements). |
 | **D12** | Correctness | Model Provenance & False Detection Capabilities (COCO vs Custom Waste) | **Closed (Detection side)** | `64e8b48` | `test_correctness.py::test_every_mapping_coco_label_exists_in_model_classes`, `test_correctness.py::test_recyclable_and_biodegradable_allowed_enum_values`, `test_correctness.py::test_unmapped_coco_labels_produce_no_waste_items` | Asserts mapping table matches model classes, allowed enums, and unmapped labels produce no waste items. Shared taxonomy pending Phase 1. |
-| **D13** | Correctness | Inconsistent Confidence Units (0–1 vs 0–100 Percentage) | **Partial** | `cad3d01` | `test_correctness.py::test_all_confidence_values_within_zero_to_one`, `test_correctness.py::test_settings_confidence_contract_accepts_unit_float_and_rejects_percentage` | Downgraded to Partial per R2: confidence normalized to unit float, but `NaN` and `inf` validation (`math.isfinite`) on `POST /api/settings` remains pending Phase 2.5. |
+| **D13** | Correctness | Inconsistent Confidence Units (0–1 vs 0–100 Percentage) | **Closed** | `cad3d01`, `9edada4` | `test_correctness.py::test_all_confidence_values_within_zero_to_one`, `test_correctness.py::test_settings_confidence_contract_accepts_unit_float_and_rejects_percentage` | Normalized confidence to float in [0.0, 1.0]; rejects legacy 50%, negative values, > 1.0, and non-finite NaN, inf, -inf with HTTP 400. |
 | **D14** | Maintenance | Binary Model Committed Without Git LFS | **Open** | — | — | Documented provenance and SHA256; Git LFS migration deferred. |
 | **D15** | Maintenance | Superfluous Node.js `package.json` in Python FastAPI Project | **Open** | — | — | Cleanup scheduled for Phase 6. |
 | **D16** | Quality | Workspace and Directory Naming Inconsistencies | **Open** | — | — | Documented; localized workspace paths maintained. |
-| **D-NEW1** | Integration | Hardcoded Third-Party Vercel Production Target (`eco-wing-7pua.vercel.app`) | **Open** | — | — | Scheduled for Phase 2.9 (remove external fallback target). |
+| **D-NEW1** | Integration | Hardcoded Third-Party Vercel Production Target (`eco-wing-7pua.vercel.app`) | **Closed** | `da01a24` | Automated grep verification across codebase | Hardcoded third-party Vercel URLs removed from public/static/js/main.js, static/js/main.js, public/mobile.html, templates/mobile.html, public/index.html, templates/index.html. |
 
 ---
 
@@ -65,7 +65,7 @@ In accordance with Ground Rule **R2**, an audit item is marked **Closed** ONLY i
 
 | ID | Origin / Classification | Description | Status Under R2 | Verification Path | Justification & Requirements |
 |---|---|---|---|---|---|
-| **OP-1** | Added, non-audit | Mobile Camera HTTPS/WSS Transport (`getUserMedia`) | **Open** | Phase 2.7 | Required by modern browser W3C Secure Context specs for `getUserMedia`. Relates to finding D9; disabled by default unless TLS configured. |
+| **OP-1** | Added, non-audit | Mobile Camera HTTPS/WSS Transport (`getUserMedia`) | **Closed** | `3f72afa` | `test_security.py::test_mobile_secure_context_enforcement` | Enforces browser Secure Context on GET /mobile; serves informational notice on plain HTTP LAN; MOBILE_ENABLED=false by default. |
 | **OP-2** | Added, non-audit | Docker Network Gateway & Nginx Video Feed Gate (`/video_feed`) | **Open / Unverified** | Phase 4.2 | Mandated by deployment topology (user prompt Step 6a / Phase 4). Requires Docker daemon; Nginx `auth_request` validating operator token. |
 | **OP-3** | Added, non-audit | Trusted Proxy Topology Verification | **Open / Unverified** | Phase 2.6 / 4.3 | Mandated by user prompt Step 6a / Phase 2.6. `TRUSTED_PROXIES` empty by default; requires exact gateway IP verification under Compose. |
 | **OP-MONGO-AUTH** | Added, non-audit | Mongo `--auth` Container Flag Enforcement | **Open / Unverified** | Phase 3.4 | Mandated by user prompt Step 6a / Phase 3.4. Requires Docker daemon to verify container startup with explicit `--auth` flag. |
@@ -77,9 +77,10 @@ In accordance with Ground Rule **R2**, an audit item is marked **Closed** ONLY i
 ## 3. Summary of Status Counts
 
 - **Authoritative Items from AUDIT.md:** 37
-  - **Closed:** 9 (E1, E2, E3, E-NEW2, D1, D5, D6, D7, D12)
-  - **Partial:** 5 (E4, E6, E13, E-NEW1, D13)
-  - **Open / Unverified:** 23 (E5, E7, E8, E9, E10, E11, E12, I1, I2, I3, I4, I5, D2, D3, D4, D8, D9, D10, D11, D14, D15, D16, D-NEW1)
+  - **Closed:** 17 (E1, E2, E3, E-NEW2, I2, I4, I5, D1, D2, D4, D5, D6, D7, D9, D12, D13, D-NEW1)
+  - **Partial:** 6 (E4, E6, E13, E-NEW1, I1, I3)
+  - **Open / Unverified:** 14 (E5, E7, E8, E9, E10, E11, E12, D3, D8, D10, D11, D14, D15, D16)
 - **Added, Non-Audit Operational Items:** 6
-  - **Open / Unverified:** 6 (OP-1, OP-2, OP-3, OP-MONGO-AUTH, OP-SHARED-LOCKOUT, OP-LINE-ENDINGS)
+  - **Closed:** 1 (OP-1)
+  - **Open / Unverified:** 5 (OP-2, OP-3, OP-MONGO-AUTH, OP-SHARED-LOCKOUT, OP-LINE-ENDINGS)
 - **Grand Total Rows:** 43
