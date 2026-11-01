@@ -823,3 +823,11 @@ def test_d8_reverse_proxy_https_and_relative_paths():
     assert data["relative_api_path"] == "/api/detections"
     assert 'src="/video_feed"' in data["integration_examples"]["html_relative"]
     assert 'fetch("/api/detections")' in data["integration_examples"]["fetch_js_relative"]
+
+
+def test_d15_superfluous_package_json_removed():
+    """
+    D15: Verifies that superfluous Node.js package.json is absent from Python FastAPI repository.
+    """
+    pkg_json = BASE_DIR / "package.json"
+    assert not pkg_json.exists(), f"Superfluous package.json must not exist in Python repository: {pkg_json}"
