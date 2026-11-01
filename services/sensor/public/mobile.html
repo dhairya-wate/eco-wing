@@ -728,7 +728,7 @@
               if (now - lastDetectionBroadcastTime > 1000) {
                 lastDetectionBroadcastTime = now;
                 const matType = topItem.item.recyclable ? 'Recyclable' : (topItem.item.biodegradable ? 'Biodegradable' : 'Non-Recyclable');
-                const confNormalized = Number((topItem.conf / 100).toFixed(2));
+                const confNormalized = typeof topItem.conf === 'number' ? (topItem.conf <= 1.0 ? Number(topItem.conf.toFixed(2)) : Number((topItem.conf / 100).toFixed(2))) : 0.0;
                 const detEvent = {
                   type: 'detection',
                   item: topItem.item.name,

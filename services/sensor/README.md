@@ -7,8 +7,10 @@ A real-time AI computer vision software designed for the **EcoWing Project**. It
 ## 🚀 Key Features
 
 1. **Pretrained YOLO AI Detection:**
-   - Detects waste items including **Paper**, **Glass**, **Can / Metal**, **Cardboard**, **Plastic**, and **Organic Food Waste**.
-   - Strictly ignores non-waste items (humans, animals, furniture, backgrounds).
+   - Uses standard 80-class COCO pretrained YOLO (`yolo26n.pt`).
+   - Mapped COCO object classes are categorized into waste taxonomy items.
+   - **Note:** The model does **NOT** directly detect materials such as paper, glass, cans, or plastic. Only recognized COCO objects (e.g. bottles, cups, cutlery, food scraps) are mapped to waste properties.
+   - Strictly ignores unmapped non-waste classes (e.g. person, car, dog, chair).
 
 2. **Dual-Axis Eco Classification:**
    - **Recyclable:** `YES` or `NO`
@@ -50,13 +52,36 @@ When the server is running on your machine:
 | **Mobile Stream WS** | `ws://<IP>:5000/ws/mobile_stream` | In-band session auth | Phone camera stream ingest |
 
 > [!IMPORTANT]
-> **API Contract Change Notice (`/api/system_info`):**
-> `/api/system_info` previously allowed unauthenticated access and exposed raw camera source URLs. It now strictly requires the `X-Operator-Token` header.
+> **API Contract Change Notice (`/api/detections` & `/api/system_info`):**
 >
-> **Migration Path for Callers:**
-> - Callers displaying live detection metrics should query `GET /api/detections` or connect to `WebSocket /ws`, which remain public and require no authentication.
-> - Callers managing server configuration must provide the header: `X-Operator-Token: <your_operator_token>`.
-> - Query parameter authentication (`?token=`) is strictly rejected with HTTP 401 Unauthorized.
+> 1. **Confidence Normalization (`/api/detections`):**
+>    - **Old Contract:** `item.confidence` was returned as a percentage float between `0.0` and `100.0` (e.g. `94.5`).
+>    - **New Contract:** `item.confidence` is now normalized to a standard unit float between `0.0` and `1.0` (e.g. `0.9450`).
+>    - **Migration Notes:** Clients displaying confidence must format for display (e.g. `Math.round(item.confidence * 100)` in JS or `f"{conf*100:.1f}%"` in Python).
+>
+> 2. **Recyclable & Biodegradable Enums (`/api/detections`):**
+>    - **Old Contract:** `item.recyclable` and `item.biodegradable` were booleans (`true`/`false`).
+>    - **New Contract:** Now strict categorical enums: `"yes"`, `"no"`, `"estimated"`, `"depends"`, or `"unknown"`.
+>    - **Migration Notes:** Update boolean checks from `if (item.recyclable)` to `['yes', 'estimated'].includes(item.recyclable)`.
+>
+> 3. **Additive & Restored Fields (`/api/detections`):**
+>    - `timestamp`: Unix float epoch timestamp (e.g. `1793215978.123456`). Preserves original float type.
+>    - `timestamp_iso`: ISO 8601 UTC string (e.g. `2026-11-01T07:35:12.345678+00:00`).
+>    - `age_seconds`: Float indicating elapsed seconds since the latest inference update.
+>    - `stale`: Boolean (`true` if `age_seconds > DETECTION_STALE_AFTER_SECONDS` [default 5s]).
+>    - `data.taxonomy_version`: Currently `"1.0.0"`.
+>    - `data.classification_method`: `"coco_mapping"`.
+>    - `item.coco_label`: Ground-truth COCO class label.
+>    - `item.material`: Material string (defaults to `"unknown"` unless determined by a material model).
+>    - `item.model_supported`: Boolean `true`.
+>
+> 4. **Confidence Unit on Settings (`POST /api/settings`):**
+>    - `confidence`: Accepts standard unit float in `[0.0, 1.0]` (e.g. `0.5` sets 50% threshold).
+>    - Legacy percentage values (`50`) and out-of-range floats are strictly rejected with HTTP 400 Bad Request.
+>
+> 5. **System Info & Worker Status (`/api/system_info`):**
+>    - `worker_running`: Boolean indicating whether background detection worker thread is actively processing frames.
+>    - Strictly requires `X-Operator-Token` header. Query parameter `?token=` is rejected with HTTP 401.
 
 ---
 
@@ -181,7 +206,8 @@ async function fetchEcoWingStats() {
     
     // List of individual items in view
     data.items.forEach(item => {
-      console.log(`${item.name} (${item.confidence}%): Recyclable=${item.recyclable}, Bio=${item.biodegradable}`);
+      const pct = Math.round(item.confidence * 100);
+      console.log(`${item.name} (${pct}%): Recyclable=${item.recyclable}, Bio=${item.biodegradable}`);
     });
   } catch (err) {
     console.error("EcoWing Server Offline:", err);
@@ -193,16 +219,33 @@ setInterval(fetchEcoWingStats, 1000);
 
 ---
 
-## 🗂️ Waste Classification Rules
+## 🗂️ COCO-to-Waste Mapping Table (`config.COCO_WASTE_MAPPING`)
 
-| Item | Category | Recyclable? | Biodegradable? | Bin Recommendation |
-| :--- | :--- | :---: | :---: | :--- |
-| **Paper / Booklet** | Paper | ✅ YES | ✅ YES | Blue Bin (Paper/Dry) |
-| **Cardboard Box** | Cardboard | ✅ YES | ✅ YES | Blue Bin (Paper/Dry) |
-| **Glass Bottle / Scrap** | Glass | ✅ YES | ❌ NO | Cyan / Glass Bin |
-| **Beverage Can / Tin** | Metal / Can | ✅ YES | ❌ NO | Yellow Bin (Metals) |
-| **Plastic Bottle** | Plastic | ✅ YES | ❌ NO | Yellow / Recyclable Bin |
-| **Food Scrap / Peels** | Organic | ❌ NO | ✅ YES | Green Bin (Compost) |
+> [!NOTE]
+> The detector uses standard 80-class COCO weights (`yolo26n.pt`). It does **NOT** detect raw materials (such as loose paper, broken glass, scrap metal, or raw plastic) directly.
+> Only recognized COCO object classes are mapped to waste categories and disposal properties using the table below (Taxonomy v1.0.0, classification method `coco_mapping`).
+> Any COCO class not present in this mapping table is strictly ignored and never reported as waste.
+
+| COCO Label | Category | Material | Recyclable | Biodegradable | Method | Model Supported | Recommended Bin |
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- |
+| `bottle` | Container | unknown | depends | no | coco_mapping | true | Blue / Cyan Bin (Plastics/Glass) |
+| `cup` | Container | unknown | depends | depends | coco_mapping | true | Yellow / Blue Bin (Metals/Paper) |
+| `wine glass` | Glassware | unknown | yes | no | coco_mapping | true | Cyan Bin (Glass) |
+| `fork` | Cutlery | unknown | depends | no | coco_mapping | true | Yellow / Blue Bin |
+| `knife` | Cutlery | unknown | depends | no | coco_mapping | true | Yellow / Blue Bin |
+| `spoon` | Cutlery | unknown | depends | no | coco_mapping | true | Yellow / Blue Bin |
+| `bowl` | Container | unknown | depends | no | coco_mapping | true | Mixed Waste Bin |
+| `banana` | Organic | unknown | no | yes | coco_mapping | true | Green Bin (Compost) |
+| `apple` | Organic | unknown | no | yes | coco_mapping | true | Green Bin (Compost) |
+| `sandwich` | Organic | unknown | no | yes | coco_mapping | true | Green Bin (Compost) |
+| `orange` | Organic | unknown | no | yes | coco_mapping | true | Green Bin (Compost) |
+| `broccoli` | Organic | unknown | no | yes | coco_mapping | true | Green Bin (Compost) |
+| `carrot` | Organic | unknown | no | yes | coco_mapping | true | Green Bin (Compost) |
+| `hot dog` | Organic | unknown | no | yes | coco_mapping | true | Green Bin (Compost) |
+| `pizza` | Organic | unknown | no | yes | coco_mapping | true | Green Bin (Compost) |
+| `donut` | Organic | unknown | no | yes | coco_mapping | true | Green Bin (Compost) |
+| `cake` | Organic | unknown | no | yes | coco_mapping | true | Green Bin (Compost) |
+| `book` | Paper/Reading | unknown | yes | yes | coco_mapping | true | Blue Bin (Paper/Dry) |
 
 ---
 

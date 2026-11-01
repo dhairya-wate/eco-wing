@@ -333,7 +333,7 @@ document.addEventListener("DOMContentLoaded", () => {
                   drone_id: "Device Webcam",
                   class_name: top.name,
                   material_type: top.recyclable ? "Recyclable" : (top.biodegradable ? "Biodegradable" : "Non-Recyclable"),
-                  confidence: Number((top.confidence / 100).toFixed(2)),
+                  confidence: top.confidence <= 1.0 ? Number(top.confidence.toFixed(2)) : Number((top.confidence / 100).toFixed(2)),
                   center: [320, 240]
                 })
               }).catch(() => {});
@@ -495,15 +495,22 @@ document.addEventListener("DOMContentLoaded", () => {
     if (data.items && data.items.length > 0) {
       let html = "";
       data.items.forEach(item => {
-        const recClass = item.recyclable ? "tag-rec-yes" : "tag-rec-no";
-        const recText = item.recyclable ? "Recyclable" : "Non-Recyclable";
-        const bioClass = item.biodegradable ? "tag-bio-yes" : "tag-bio-no";
-        const bioText = item.biodegradable ? "Bio-degradable" : "Non-Bio";
+        const isRec = item.recyclable === "yes" || item.recyclable === "estimated" || item.recyclable === true;
+        const recClass = isRec ? "tag-rec-yes" : "tag-rec-no";
+        const recText = typeof item.recyclable === "string" ? `Rec: ${item.recyclable.toUpperCase()}` : (isRec ? "Recyclable" : "Non-Recyclable");
+
+        const isBio = item.biodegradable === "yes" || item.biodegradable === "estimated" || item.biodegradable === true;
+        const bioClass = isBio ? "tag-bio-yes" : "tag-bio-no";
+        const bioText = typeof item.biodegradable === "string" ? `Bio: ${item.biodegradable.toUpperCase()}` : (isBio ? "Bio-degradable" : "Non-Bio");
+
+        const confPct = typeof item.confidence === "number"
+          ? (item.confidence <= 1.0 ? Math.round(item.confidence * 100) : Math.round(item.confidence))
+          : item.confidence;
 
         html += `
           <div class="item-badge">
             <div class="item-main">
-              <span class="item-title">${item.name} (${item.confidence}%)</span>
+              <span class="item-title">${item.name} (${confPct}%)</span>
               <span class="item-bin">Disposal: ${item.bin}</span>
             </div>
             <div class="item-tags">
