@@ -585,6 +585,229 @@ document.addEventListener("DOMContentLoaded", () => {
     confVal.textContent = `${e.target.value}%`;
   });
 
+  confSlider.addEventListener("change", async (e) => {
+    const threshold = parseFloat(e.target.value) / 100;
+    const headers = { "Content-Type": "application/json" };
+    if (operatorToken) headers["X-Operator-Token"] = operatorToken;
+    try {
+      const target = backendUrl ? `${backendUrl}/api/settings` : "/api/settings";
+      await fetch(target, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ confidence_threshold: threshold })
+      });
+    } catch (err) {}
+  });
+
+  // Operator Token Authentication
+  let operatorToken = sessionStorage.getItem("ecowing_operator_token") || "";
+  const inputOperatorToken = document.getElementById("input-operator-token");
+  const btnSaveOperatorToken = document.getElementById("btn-save-operator-token");
+  const operatorTokenStatus = document.getElementById("operator-token-status");
+
+  function updateTokenStatusUI() {
+    if (!operatorTokenStatus) return;
+    if (operatorToken) {
+      operatorTokenStatus.textContent = "✓ Token Active (Session)";
+      operatorTokenStatus.style.color = "#10b981";
+    } else {
+      operatorTokenStatus.textContent = "No Token Set";
+      operatorTokenStatus.style.color = "#ef4444";
+    }
+  }
+  updateTokenStatusUI();
+
+  if (btnSaveOperatorToken && inputOperatorToken) {
+    btnSaveOperatorToken.addEventListener("click", () => {
+      const val = inputOperatorToken.value.trim();
+      if (!val) {
+        alert("Please enter a valid operator token.");
+        return;
+      }
+      operatorToken = val;
+      sessionStorage.setItem("ecowing_operator_token", operatorToken);
+      inputOperatorToken.value = "";
+      updateTokenStatusUI();
+    });
+  }
+
+  // Video Input Source Controls
+  const sourceSelect = document.getElementById("source-select");
+  const btnApplySource = document.getElementById("btn-apply-source");
+  const customSourceRow = document.getElementById("custom-source-row");
+  const customSourceInput = document.getElementById("custom-source-input");
+  const settingsStatusMsg = document.getElementById("settings-status-msg");
+
+  if (sourceSelect) {
+    sourceSelect.addEventListener("change", () => {
+      if (sourceSelect.value === "custom") {
+        if (customSourceRow) customSourceRow.classList.remove("hidden");
+      } else {
+        if (customSourceRow) customSourceRow.classList.add("hidden");
+      }
+    });
+  }
+
+  if (btnApplySource) {
+    btnApplySource.addEventListener("click", async () => {
+      let srcVal = sourceSelect ? sourceSelect.value : "simulator";
+      if (srcVal === "custom") {
+        srcVal = customSourceInput ? customSourceInput.value.trim() : "";
+      } else if (srcVal === "0" || srcVal === "1") {
+        srcVal = parseInt(srcVal, 10);
+      }
+      if (!srcVal && srcVal !== 0) {
+        if (settingsStatusMsg) {
+          settingsStatusMsg.textContent = "Please provide a valid source.";
+          settingsStatusMsg.style.color = "#ef4444";
+        }
+        return;
+      }
+
+      const headers = { "Content-Type": "application/json" };
+      if (operatorToken) headers["X-Operator-Token"] = operatorToken;
+
+      try {
+        const target = backendUrl ? `${backendUrl}/api/settings` : "/api/settings";
+        const res = await fetch(target, {
+          method: "POST",
+          headers,
+          body: JSON.stringify({ video_source: srcVal })
+        });
+        const data = await res.json();
+        if (res.ok) {
+          if (settingsStatusMsg) {
+            settingsStatusMsg.textContent = `✓ Source updated to: ${data.settings.video_source}`;
+            settingsStatusMsg.style.color = "#10b981";
+          }
+        } else {
+          if (settingsStatusMsg) {
+            settingsStatusMsg.textContent = `⚠️ Error: ${data.detail || "Update failed (Operator Token required)"}`;
+            settingsStatusMsg.style.color = "#ef4444";
+          }
+        }
+      } catch (e) {
+        if (settingsStatusMsg) {
+          settingsStatusMsg.textContent = `⚠️ Connection error: ${e.message}`;
+          settingsStatusMsg.style.color = "#ef4444";
+        }
+      }
+    });
+  }
+
+  // Mobile Pairing Code Generation
+  const btnGenPairingCode = document.getElementById("btn-gen-pairing-code");
+  const pairingCodeDisplay = document.getElementById("pairing-code-display");
+
+  if (btnGenPairingCode && pairingCodeDisplay) {
+    btnGenPairingCode.addEventListener("click", async () => {
+      const headers = {};
+      if (operatorToken) headers["X-Operator-Token"] = operatorToken;
+
+      pairingCodeDisplay.textContent = "Generating...";
+      pairingCodeDisplay.style.color = "#94a3b8";
+
+      try {
+        const target = backendUrl ? `${backendUrl}/api/mobile/pairing_code` : "/api/mobile/pairing_code";
+        const res = await fetch(target, { method: "POST", headers });
+        const data = await res.json();
+        if (res.ok) {
+          pairingCodeDisplay.innerHTML = `Pairing Code: <span style="font-family: monospace; font-size: 16px; color: #10b981; letter-spacing: 2px;">${data.pairing_code}</span> (Valid ${data.expires_in}s)`;
+        } else {
+          pairingCodeDisplay.textContent = data.detail || "Failed to generate pairing code. Operator Token required.";
+          pairingCodeDisplay.style.color = "#ef4444";
+        }
+      } catch (e) {
+        pairingCodeDisplay.textContent = "Error: " + e.message;
+        pairingCodeDisplay.style.color = "#ef4444";
+      }
+    });
+  }
+
+  // Instant Snapshot / Dropzone Upload
+  const dropzone = document.getElementById("dropzone");
+  const fileInput = document.getElementById("file-input");
+  const uploadResult = document.getElementById("upload-result");
+
+  if (dropzone && fileInput) {
+    dropzone.addEventListener("click", () => fileInput.click());
+
+    dropzone.addEventListener("dragover", (e) => {
+      e.preventDefault();
+      dropzone.classList.add("dragover");
+    });
+    dropzone.addEventListener("dragleave", () => {
+      dropzone.classList.remove("dragover");
+    });
+    dropzone.addEventListener("drop", (e) => {
+      e.preventDefault();
+      dropzone.classList.remove("dragover");
+      if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+        handleFileUpload(e.dataTransfer.files[0]);
+      }
+    });
+
+    fileInput.addEventListener("change", (e) => {
+      if (e.target.files && e.target.files.length > 0) {
+        handleFileUpload(e.target.files[0]);
+      }
+    });
+  }
+
+  async function handleFileUpload(file) {
+    if (!file || !uploadResult) return;
+    uploadResult.classList.remove("hidden");
+    uploadResult.innerHTML = "<p style='color: var(--text-muted); padding: 8px;'>Analyzing image with YOLO waste model...</p>";
+
+    const formData = new FormData();
+    formData.append("file", file);
+
+    const headers = {};
+    if (operatorToken) headers["X-Operator-Token"] = operatorToken;
+
+    try {
+      const target = backendUrl ? `${backendUrl}/api/upload` : "/api/upload";
+      const res = await fetch(target, {
+        method: "POST",
+        headers,
+        body: formData
+      });
+      const data = await res.json();
+
+      if (res.ok && data.status === "success") {
+        const ana = data.analysis;
+        let itemsHtml = "";
+        if (ana.items && ana.items.length > 0) {
+          itemsHtml = ana.items.map(it => `
+            <div style="padding: 6px 10px; background: rgba(255,255,255,0.05); border-radius: 6px; margin-top: 4px; display: flex; justify-content: space-between; align-items: center;">
+              <span><strong>${it.name || it.class_id}</strong> (${Math.round((it.confidence || 0) * 100)}%)</span>
+              <span style="font-size: 11px; color: ${it.recyclable === 'yes' || it.recyclable === true ? '#10b981' : '#f59e0b'};">${it.category || ''}</span>
+            </div>
+          `).join("");
+        } else {
+          itemsHtml = "<p style='font-size: 12px; color: var(--text-muted);'>No waste objects detected in this snapshot.</p>";
+        }
+
+        uploadResult.innerHTML = `
+          <div style="margin-bottom: 8px; padding: 10px; background: rgba(0,0,0,0.3); border-radius: 8px;">
+            ${data.image_base64 ? `<img src="${data.image_base64}" style="width: 100%; max-height: 240px; object-fit: contain; border-radius: 8px; margin-bottom: 8px;" />` : ''}
+            <div style="font-weight: 700; color: #10b981;">✓ Detection Complete: ${ana.total_count || 0} items found</div>
+            <div style="font-size: 11px; color: var(--text-muted);">Recyclable: ${ana.recyclable_count || 0} | Biodegradable: ${ana.biodegradable_count || 0}</div>
+            <div style="margin-top: 6px;">${itemsHtml}</div>
+          </div>
+        `;
+      } else {
+        uploadResult.innerHTML = `
+          <div style="color: #ef4444; font-size: 12px; padding: 8px;">
+            ⚠️ Upload error: ${data.detail || "Analysis failed. Please verify Operator Token."}
+          </div>
+        `;
+      }
+    } catch (e) {
+      uploadResult.innerHTML = `<div style="color: #ef4444; font-size: 12px; padding: 8px;">⚠️ Upload error: ${e.message}</div>`;
+    }
+  }
+
   // Snippet Tabs
   const tabBtns = document.querySelectorAll(".tab-btn");
   tabBtns.forEach(btn => {
@@ -593,16 +816,23 @@ document.addEventListener("DOMContentLoaded", () => {
       document.querySelectorAll(".tab-content").forEach(tc => tc.classList.remove("active"));
       btn.classList.add("active");
       const targetId = btn.getAttribute("data-tab");
-      document.getElementById(targetId).classList.add("active");
+      const el = document.getElementById(targetId);
+      if (el) el.classList.add("active");
     });
   });
 
   // Copy helper
   window.copyText = function(elementId, isCode = false) {
     const el = document.getElementById(elementId);
+    if (!el) return;
     const text = isCode ? el.innerText : el.value;
     navigator.clipboard.writeText(text).then(() => {
-      alert("Copied to clipboard!");
+      const activeBtn = document.activeElement;
+      if (activeBtn && activeBtn.classList && activeBtn.classList.contains("btn")) {
+        const orig = activeBtn.textContent;
+        activeBtn.textContent = "✓ Copied!";
+        setTimeout(() => { activeBtn.textContent = orig; }, 1800);
+      }
     }).catch(err => {
       console.error("Copy failed", err);
     });

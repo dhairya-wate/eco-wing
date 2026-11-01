@@ -7,7 +7,7 @@
   <!-- Mobile Auto-Redirect to Dedicated Mobile Broadcaster -->
   <script>
     if (/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) && !window.location.search.includes('desktop=1')) {
-      window.location.href = '/mobile.html';
+      window.location.href = '/mobile';
     }
   </script>
   <link rel="stylesheet" href="/static/css/style.css">
@@ -272,7 +272,7 @@
 
           <div class="tab-content active" id="tab-html">
             <pre><code id="code-html">&lt;img 
-  src="http://YOUR_IP:5000/video_feed" 
+  src="/video_feed" 
   alt="EcoWing Waste Detection Stream" 
   style="width: 100%; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.15);" 
 /&gt;</code></pre>
@@ -281,7 +281,7 @@
 
           <div class="tab-content" id="tab-react">
             <pre><code id="code-react">&lt;img 
-  src="http://YOUR_IP:5000/video_feed" 
+  src="/video_feed" 
   alt="EcoWing Stream" 
   className="w-full rounded-2xl border border-emerald-500/20 shadow-xl"
 /&gt;</code></pre>
@@ -291,7 +291,7 @@
           <div class="tab-content" id="tab-js">
             <pre><code id="code-js">// Fetch live detection results on EcoWing website:
 async function getWasteTelemetry() {
-  const res = await fetch("http://YOUR_IP:5000/api/detections");
+  const res = await fetch("/api/detections");
   const data = await res.json();
   console.log(data.data.items);
 }</code></pre>
