@@ -4,7 +4,7 @@ import re
 import subprocess
 import pytest
 
-ECOWING_DIR = os.path.dirname(os.path.abspath(__file__))
+ECOWING_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 def run_node_eval(code: str, env: dict = None) -> dict:
     """Executes Node snippet and parses JSON output."""

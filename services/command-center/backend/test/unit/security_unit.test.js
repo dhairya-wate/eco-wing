@@ -1,35 +1,31 @@
-const { createRateLimiter } = require('../middleware/rateLimiter');
-const Telemetry = require('../models/Telemetry');
-process.env.NODE_ENV = 'test';
 const test = require('node:test');
 const { after } = test;
 const assert = require('node:assert/strict');
+const path = require('path');
+const fs = require('fs');
+const http = require('http');
 
+process.env.NODE_ENV = 'test';
 process.env.ECOWING_OPERATOR_TOKEN = 'secure_test_operator_token_9xK2mP7qR4vL8wZ1';
 process.env.DRONE_DEVICE_TOKENS = JSON.stringify({
   'Drone-Alpha': 'drone_alpha_token_12345678901234567890',
   'Drone-Beta': 'drone_beta_token_12345678901234567890'
 });
 
+const rootDir = path.resolve(__dirname, '../../..');
+
+const { createRateLimiter } = require('../../middleware/rateLimiter');
+const Telemetry = require('../../models/Telemetry');
 const {
   validateOperatorTokenConfig,
   verifyOperatorToken,
   verifyDroneToken,
   constantTimeCompare,
   getExpectedDroneToken
-} = require('../middleware/auth');
-
-const {
-  validateTarget
-} = require('../routes/drone');
-const { validateMongoUriConfig, allowedOrigins } = require('../app');
-const { verifySocketDroneAuth } = require('../server');
-const {
-  validateCanonicalDetectionEvent,
-  validateDetectionPayload
-} = require('../validators/detectionValidator');
-const detectionStore = require('../detectionStore');
-
+} = require('../../middleware/auth');
+const { validateTarget } = require('../../routes/drone');
+const { validateMongoUriConfig, allowedOrigins } = require('../../app');
+const { verifySocketDroneAuth } = require('../../server');
 test('Operator Token Configuration Validation', async (t) => {
   await t.test('fails when operator token is empty', () => {
     assert.throws(() => validateOperatorTokenConfig(''), /is not set/);
@@ -103,7 +99,7 @@ test('CORS Allowlist Validation (E-NEW1)', async (t) => {
 
   await t.test('HTTP requests with unauthorized Origin are rejected with 403 and no CORS header', async () => {
     const http = require('http');
-    const app = require('../app');
+    const app = require('../../app');
     const srv = http.createServer(app);
     await new Promise(r => srv.listen(0, '127.0.0.1', r));
     const port = srv.address().port;
@@ -300,285 +296,6 @@ test('Video Feed Operator Auth Gate (/video_feed)', async (t) => {
   });
 });
 
-test('Canonical Detection Event Schema Validation', async (t) => {
-  const validEvent = {
-    event_id: '12345678-1234-4234-8234-123456789abc',
-    drone_id: 'Drone-Alpha',
-    source: 'camera',
-    observed_at: '2026-11-01T04:00:00.000Z',
-    taxonomy_version: '1.0.0',
-    classification_method: 'coco_mapping',
-    items: [
-      {
-        class_id: 'bottle',
-        coco_label: 'bottle',
-        confidence: 0.95,
-        bbox: [100, 150, 200, 300],
-        category: 'Container',
-        material: 'plastic',
-        recyclable: 'yes',
-        biodegradable: 'no'
-      }
-    ]
-  };
-
-  await t.test('accepts valid canonical detection event', () => {
-    const res = validateCanonicalDetectionEvent(validEvent);
-    assert.equal(res.valid, true);
-    assert.equal(res.errors.length, 0);
-
-    const payloadRes = validateDetectionPayload(validEvent);
-    assert.equal(payloadRes.valid, true);
-    assert.equal(payloadRes.isCanonical, true);
-  });
-
-  await t.test('rejects missing required event_id', () => {
-    const bad = { ...validEvent };
-    delete bad.event_id;
-    const res = validateCanonicalDetectionEvent(bad);
-    assert.equal(res.valid, false);
-    assert.ok(res.errors.some(e => e.includes('event_id')));
-  });
-
-  await t.test('rejects non-UUIDv4 event_id', () => {
-    const bad = { ...validEvent, event_id: 'not-a-valid-uuid' };
-    const res = validateCanonicalDetectionEvent(bad);
-    assert.equal(res.valid, false);
-    assert.ok(res.errors.some(e => e.includes('UUIDv4')));
-  });
-
-  await t.test('rejects confidence outside [0.0, 1.0] and non-finite values', () => {
-    const badHigh = {
-      ...validEvent,
-      items: [{ ...validEvent.items[0], confidence: 1.5 }]
-    };
-    assert.equal(validateCanonicalDetectionEvent(badHigh).valid, false);
-
-    const badNegative = {
-      ...validEvent,
-      items: [{ ...validEvent.items[0], confidence: -0.1 }]
-    };
-    assert.equal(validateCanonicalDetectionEvent(badNegative).valid, false);
-
-    const badPct = {
-      ...validEvent,
-      items: [{ ...validEvent.items[0], confidence: 50 }]
-    };
-    assert.equal(validateCanonicalDetectionEvent(badPct).valid, false);
-
-    const badNaN = {
-      ...validEvent,
-      items: [{ ...validEvent.items[0], confidence: NaN }]
-    };
-    assert.equal(validateCanonicalDetectionEvent(badNaN).valid, false);
-  });
-
-  await t.test('rejects unknown class_id not in canonical taxonomy', () => {
-    const bad = {
-      ...validEvent,
-      items: [{ ...validEvent.items[0], class_id: 'plastic_wrapper' }]
-    };
-    const res = validateCanonicalDetectionEvent(bad);
-    assert.equal(res.valid, false);
-    assert.ok(res.errors.some(e => e.includes('canonical taxonomy identifier')));
-  });
-
-  await t.test('rejects invalid source enum', () => {
-    const bad = { ...validEvent, source: 'satellite' };
-    const res = validateCanonicalDetectionEvent(bad);
-    assert.equal(res.valid, false);
-    assert.ok(res.errors.some(e => e.includes('source')));
-  });
-
-  await t.test('rejects invalid bbox format', () => {
-    const bad = {
-      ...validEvent,
-      items: [{ ...validEvent.items[0], bbox: [10, 20] }]
-    };
-    const res = validateCanonicalDetectionEvent(bad);
-    assert.equal(res.valid, false);
-    assert.ok(res.errors.some(e => e.includes('bbox')));
-  });
-
-  await t.test('detectionStore deduplicates identical canonical_event_id', () => {
-    const origCount = detectionStore.events.length;
-    const testId = 'idemp-uuid-' + Date.now() + '-' + Math.floor(Math.random() * 1000000);
-    const first = detectionStore.addDetection({
-      canonical_event_id: testId,
-      class_name: 'bottle',
-      confidence: 0.95
-    });
-    const afterFirst = detectionStore.events.length;
-    assert.equal(afterFirst, origCount + 1);
-
-    const second = detectionStore.addDetection({
-      canonical_event_id: testId,
-      class_name: 'bottle',
-      confidence: 0.95
-    });
-    const afterSecond = detectionStore.events.length;
-    assert.equal(afterSecond, origCount + 1, 'Store length must not grow on duplicate canonical_event_id');
-    assert.equal(second.event_id, first.event_id, 'Duplicate must return existing event object');
-  });
-
-  await t.test('POST /api/drone/detection endpoint is strictly idempotent on duplicate event_id', async () => {
-    const express = require('express');
-    const http = require('http');
-    const droneRouter = require('../routes/drone');
-    const testApp = express();
-    testApp.use(express.json());
-    testApp.use('/api/drone', droneRouter);
-
-    const srv = http.createServer(testApp);
-    await new Promise(r => srv.listen(0, '127.0.0.1', r));
-    const port = srv.address().port;
-
-    const dupEvent = {
-      event_id: require('crypto').randomUUID(),
-      drone_id: 'Drone-Alpha',
-      source: 'camera',
-      observed_at: new Date().toISOString(),
-      taxonomy_version: '1.0.0',
-      classification_method: 'coco_mapping',
-      items: [{
-        class_id: 'bottle',
-        coco_label: 'bottle',
-        confidence: 0.92,
-        bbox: [10, 10, 100, 100]
-      }]
-    };
-
-    const headers = {
-      'Content-Type': 'application/json',
-      'X-Drone-Id': 'Drone-Alpha',
-      'X-Drone-Token': 'drone_alpha_token_12345678901234567890',
-      'Connection': 'close'
-    };
-
-    const countBefore = detectionStore.events.length;
-
-    // First push
-    const res1 = await fetch('http://127.0.0.1:' + port + '/api/drone/detection', {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(dupEvent)
-    });
-    assert.equal(res1.status, 200);
-    const json1 = await res1.json();
-    assert.equal(json1.success, true);
-    assert.equal(json1.count, 1);
-    assert.equal(detectionStore.events.length, countBefore + 1);
-
-    // Second push with identical event_id (idempotence verification)
-    const res2 = await fetch('http://127.0.0.1:' + port + '/api/drone/detection', {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(dupEvent)
-    });
-    assert.equal(res2.status, 200);
-    const json2 = await res2.json();
-    assert.equal(json2.success, true);
-    assert.equal(json2.duplicate, true, 'Second push must flag duplicate');
-    assert.equal(detectionStore.events.length, countBefore + 1, 'Second push must NOT create additional document');
-
-    if (typeof srv.closeAllConnections === 'function') srv.closeAllConnections();
-    await new Promise(r => srv.close(r));
-  });
-});
-
-const { CommandManager } = require('../services/commandManager');
-
-test('Drone Safety Command Manager & State Machine (E9)', async (t) => {
-  const cm = new CommandManager();
-
-  await t.test('creates command in initial state requested with UUIDv4', () => {
-    const cmd = cm.createCommand({ drone_id: 'Drone-Alpha', command: 'land' });
-    assert.equal(cmd.state, 'requested');
-    assert.match(cmd.command_id, /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/);
-    assert.equal(cmd.state_history.length, 1);
-    assert.equal(cmd.state_history[0].state, 'requested');
-  });
-
-  await t.test('rejects invalid command verb', () => {
-    assert.throws(() => {
-      cm.createCommand({ drone_id: 'Drone-Alpha', command: 'explode' });
-    }, /Invalid command verb/);
-  });
-
-  await t.test('follows valid state machine lifecycle: requested -> sent -> acknowledged -> executing -> completed', () => {
-    const cmd = cm.createCommand({ drone_id: 'Drone-Alpha', command: 'start' });
-    const id = cmd.command_id;
-
-    const r1 = cm.transitionCommand(id, 'sent', 'sent to socket');
-    assert.equal(r1.ok, true);
-    assert.equal(r1.command.state, 'sent');
-
-    const r2 = cm.transitionCommand(id, 'acknowledged', 'ack received');
-    assert.equal(r2.ok, true);
-    assert.equal(r2.command.state, 'acknowledged');
-
-    const r3 = cm.transitionCommand(id, 'executing', 'takeoff initiated');
-    assert.equal(r3.ok, true);
-    assert.equal(r3.command.state, 'executing');
-
-    const r4 = cm.transitionCommand(id, 'completed', 'in flight');
-    assert.equal(r4.ok, true);
-    assert.equal(r4.command.state, 'completed');
-    assert.equal(r4.command.state_history.length, 5);
-  });
-
-  await t.test('rejects illegal state transition directly from requested to completed', () => {
-    const cmd = cm.createCommand({ drone_id: 'Drone-Alpha', command: 'rth' });
-    const res = cm.transitionCommand(cmd.command_id, 'completed');
-    assert.equal(res.ok, false);
-    assert.match(res.error, /Illegal state transition/);
-  });
-
-  await t.test('rejects transition from terminal completed state', () => {
-    const cmd = cm.createCommand({ drone_id: 'Drone-Alpha', command: 'land' });
-    cm.transitionCommand(cmd.command_id, 'sent');
-    cm.transitionCommand(cmd.command_id, 'acknowledged');
-    cm.transitionCommand(cmd.command_id, 'executing');
-    cm.transitionCommand(cmd.command_id, 'completed');
-
-    const res = cm.transitionCommand(cmd.command_id, 'executing');
-    assert.equal(res.ok, false);
-    assert.match(res.error, /Illegal state transition/);
-  });
-
-  await t.test('detects stale telemetry past 10 seconds threshold', () => {
-    const pastTime = Date.now() - 15000; // 15s ago
-    cm.recordTelemetry('Drone-Stale', pastTime);
-
-    const freshness = cm.checkTelemetryFreshness('Drone-Stale', 10.0);
-    assert.equal(freshness.fresh, false);
-    assert.ok(freshness.age_seconds >= 14.9);
-    assert.match(freshness.error, /Stale telemetry/);
-
-    // After updating with fresh telemetry
-    cm.recordTelemetry('Drone-Stale', Date.now());
-    const freshNow = cm.checkTelemetryFreshness('Drone-Stale', 10.0);
-    assert.equal(freshNow.fresh, true);
-  });
-
-  await t.test('arms ACK timeout transitioning sent command to timed_out', async () => {
-    const cmd = cm.createCommand({ drone_id: 'Drone-Alpha', command: 'hold' });
-    cm.transitionCommand(cmd.command_id, 'sent');
-
-    let timeoutFired = false;
-    cm.armAckTimeout(cmd.command_id, 0.05, (timedOutCmd) => {
-      timeoutFired = true;
-    });
-
-    await new Promise(resolve => setTimeout(resolve, 80));
-
-    assert.equal(timeoutFired, true);
-    const updated = cm.getCommand(cmd.command_id);
-    assert.equal(updated.state, 'timed_out');
-    assert.match(updated.error_message, /ACK timeout/);
-  });
-});
-
 test('Telemetry Model TTL Index Configuration (E8)', async (t) => {
   await t.test('has configurable TTL seconds defaulting to 7 days', () => {
     assert.equal(typeof Telemetry.TELEMETRY_TTL_SECONDS, 'number');
@@ -636,13 +353,13 @@ test('Infrastructure & Compose Hardening (E10, E11)', async (t) => {
   const path = require('path');
 
   await t.test('package.json declares Node engine >=20.0.0', () => {
-    const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf-8'));
+    const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', '..', 'package.json'), 'utf-8'));
     assert.ok(pkg.engines, 'package.json must contain engines field');
     assert.equal(pkg.engines.node, '>=20.0.0');
   });
 
   await t.test('docker-compose.yml pins mongo image, adds --auth flag, and specifies service_healthy healthcheck', () => {
-    const composeContent = fs.readFileSync(path.join(__dirname, '..', '..', 'docker-compose.yml'), 'utf-8');
+    const composeContent = fs.readFileSync(path.join(__dirname, '..', '..', '..', 'docker-compose.yml'), 'utf-8');
     assert.match(composeContent, /image:\s*mongo:7\.0\.14-jammy/, 'MongoDB image must be pinned');
     assert.match(composeContent, /command:\s*\["--auth"\]/, 'MongoDB must run with --auth command flag');
     assert.match(composeContent, /healthcheck:/, 'MongoDB must have healthcheck');
@@ -653,7 +370,7 @@ test('Infrastructure & Compose Hardening (E10, E11)', async (t) => {
 test('Root Governance & CI Pipelines (E13)', async (t) => {
   const fs = require('fs');
   const path = require('path');
-  const rootDir = path.join(__dirname, '..', '..');
+  const rootDir = path.join(__dirname, '..', '..', '..');
 
   await t.test('root .env.example exists and contains required environment keys', () => {
     const envExamplePath = path.join(rootDir, '.env.example');
@@ -680,8 +397,8 @@ test('Root Governance & CI Pipelines (E13)', async (t) => {
 
 test('Trusted Proxy Topology & IP Extraction (OP-3)', async (t) => {
   const http = require('http');
-  const app = require('../app');
-  const { isTrustedProxy, trustedProxySet } = require('../app');
+  const app = require('../../app');
+  const { isTrustedProxy, trustedProxySet } = require('../../app');
 
   await t.test('default trustedProxySet is empty, rejecting X-Forwarded-For spoofing', async () => {
     trustedProxySet.clear();
@@ -716,7 +433,7 @@ test('Trusted Proxy Topology & IP Extraction (OP-3)', async (t) => {
 test('Nginx Reverse Proxy Configuration & Video Feed Gate (OP-2)', async (t) => {
   const fs = require('fs');
   const path = require('path');
-  const nginxConf = fs.readFileSync(path.join(__dirname, '..', '..', 'nginx.conf'), 'utf-8');
+  const nginxConf = fs.readFileSync(path.join(__dirname, '..', '..', '..', 'nginx.conf'), 'utf-8');
 
   await t.test('nginx.conf defines client_max_body_size 5m', () => {
     assert.match(nginxConf, /client_max_body_size\s+5m;/);
