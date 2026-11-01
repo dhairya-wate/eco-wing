@@ -98,6 +98,34 @@ test('CORS Allowlist Validation (E-NEW1)', async (t) => {
   await t.test('wildcard origin is NOT present in allowedOrigins', () => {
     assert.equal(allowedOrigins.includes('*'), false);
   });
+
+  await t.test('HTTP requests with unauthorized Origin are rejected with 403 and no CORS header', async () => {
+    const http = require('http');
+    const app = require('../app');
+    const srv = http.createServer(app);
+    await new Promise(r => srv.listen(0, '127.0.0.1', r));
+    const port = srv.address().port;
+    try {
+      // Authorized origin
+      const resAuth = await fetch(`http://127.0.0.1:${port}/health`, {
+        headers: { 'Origin': 'http://localhost:8080' }
+      });
+      assert.equal(resAuth.status, 200);
+      assert.equal(resAuth.headers.get('access-control-allow-origin'), 'http://localhost:8080');
+
+      // Unauthorized origin
+      const resUnauth = await fetch(`http://127.0.0.1:${port}/health`, {
+        headers: { 'Origin': 'http://evil-attacker.com' }
+      });
+      assert.equal(resUnauth.status, 403);
+      assert.equal(resUnauth.headers.get('access-control-allow-origin'), null);
+      const body = await resUnauth.json();
+      assert.equal(body.error, 'Forbidden');
+      assert.match(body.message, /CORS policy violation/);
+    } finally {
+      srv.close();
+    }
+  });
 });
 
 test('Socket.IO Drone Event Device Token Verification (E2 & E-NEW1)', async (t) => {

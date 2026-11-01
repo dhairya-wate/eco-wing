@@ -831,20 +831,56 @@ def test_mongo_uri_credential_validation():
 
 
 def test_e_new1_cors_origin_allowlist():
-    """E-NEW1: Restrict CORS to configured origin allowlist (wildcard * is strictly rejected)."""
+    """E-NEW1: Restrict CORS to configured origin allowlist (wildcard * is strictly rejected, unauthorized origins rejected with 403)."""
     code = """
+    const http = require('http');
+    const app = require('./backend/app');
     const { allowedOrigins } = require('./backend/app');
-    console.log(JSON.stringify({
-        has_wildcard: allowedOrigins.includes('*'),
-        has_local_8080: allowedOrigins.includes('http://localhost:8080'),
-        has_local_3000: allowedOrigins.includes('http://localhost:3000')
-    }));
-    process.exit(0);
+
+    const srv = http.createServer(app);
+    srv.listen(0, '127.0.0.1', async () => {
+        const port = srv.address().port;
+        try {
+            // Authorized origin HTTP request
+            const rAuth = await fetch(`http://127.0.0.1:${port}/health`, {
+                headers: { 'Origin': 'http://localhost:8080' }
+            });
+            const allowOriginHeader = rAuth.headers.get('access-control-allow-origin');
+
+            // Unauthorized origin HTTP request
+            const rUnauth = await fetch(`http://127.0.0.1:${port}/health`, {
+                headers: { 'Origin': 'http://evil-attacker.com' }
+            });
+            const unauthAllowOriginHeader = rUnauth.headers.get('access-control-allow-origin');
+            const unauthBody = await rUnauth.json();
+
+            console.log(JSON.stringify({
+                has_wildcard: allowedOrigins.includes('*'),
+                has_local_8080: allowedOrigins.includes('http://localhost:8080'),
+                has_local_3000: allowedOrigins.includes('http://localhost:3000'),
+                auth_status: rAuth.status,
+                auth_header: allowOriginHeader,
+                unauth_status: rUnauth.status,
+                unauth_header: unauthAllowOriginHeader,
+                unauth_error: unauthBody.error
+            }));
+        } catch (e) {
+            console.error(e);
+            console.log(JSON.stringify({ error: e.message }));
+        } finally {
+            srv.close();
+        }
+    });
     """
     out = run_node_eval(code)
     assert out["has_wildcard"] is False
     assert out["has_local_8080"] is True
     assert out["has_local_3000"] is True
+    assert out["auth_status"] == 200
+    assert out["auth_header"] == "http://localhost:8080"
+    assert out["unauth_status"] == 403
+    assert out["unauth_header"] is None
+    assert out["unauth_error"] == "Forbidden"
 
 
 def test_socket_io_drone_events_require_device_token():

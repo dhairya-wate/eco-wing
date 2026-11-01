@@ -147,8 +147,15 @@ app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, '..', 'index.html'));
 });
 
-// Central error handling middleware (handles JSON parse errors and 413 Payload Too Large)
+// Central error handling middleware (handles JSON parse errors, CORS rejection, and 413 Payload Too Large)
 app.use((err, req, res, next) => {
+  if (err.message && err.message.startsWith('CORS policy violation')) {
+    return res.status(403).json({
+      status: 'error',
+      error: 'Forbidden',
+      message: err.message
+    });
+  }
   if (err.type === 'entity.too.large' || err.status === 413) {
     return res.status(413).json({
       status: 'error',
