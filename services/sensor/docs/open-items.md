@@ -18,8 +18,8 @@ In accordance with Ground Rule **R2**, an audit item is marked **Closed** ONLY i
 | **E5** | Security | Backend Port 3000 Published Directly (Bypasses Nginx Security Headers) | **Partial / Unverified** | `1bd9cbe` | `docker-compose.yml` static config check | Host port mapping removed from `docker-compose.yml`. Lacks automated container runtime test. Blocked on Docker daemon availability (R3). |
 | **E6** | Correctness/Safety | Missing Payload Schema Validation (Coordinates, Battery, Flight Status, Commands) | **Closed** | `7c56fac`, `3fc1a0b` | `test_drone_security.py::test_detection_ingestion_canonical_schema_validation_and_rejection`, `test_drone_security.py::test_e2_telemetry_coordinate_battery_validation`, `backend/test/security.test.js` | Full canonical JSON schema validation on detection events (UUIDv4 event_id, [0,1] confidence, canonical taxonomy, ISO 8601 UTC) and coordinate/battery bounds. |
 | **E7** | Reliability | Unbounded Body Size (20 MB) & Missing Rate Limits on Ingestion | **Closed** | `e03ab1d` | `test_drone_security.py::test_e7_payload_size_limit_and_ingestion_rate_limiting`, `backend/test/security.test.js` | Body size restricted to 5MB (returns 413 Payload Too Large on overflow); sliding window rate limiter protects `/telemetry`, `/detection`, and `/stream-frame` with HTTP 429 and Retry-After header. |
-| **E8** | Reliability | Telemetry Stored Indefinitely Without TTL Expiration Index | **Closed** | `68fbaf9` | `test_drone_security.py::test_e8_telemetry_ttl_index_configuration`, `backend/test/security.test.js` | Mongoose schema TTL index configured on `timestamp` with `expireAfterSeconds` defaulting to 7 days (`604800` seconds), configurable via `TELEMETRY_TTL_SECONDS`. |
-| **E9** | Safety | Missing Command Acknowledgement, Command IDs & Failsafe Guards | **Closed** | `9dc3891` | `test_drone_security.py::test_e9_physical_drone_safety_controls_and_state_machine`, `backend/test/security.test.js` | Commands assigned UUIDv4 `command_id`; strict FSM lifecycle transitions (`requested` -> `sent` -> `acknowledged` -> `executing` -> `completed`); stale telemetry (>10s) rejects flight commands with 409; ACK timeout transitions to `timed_out`. |
+| **E8** | Reliability | Telemetry Stored Indefinitely Without TTL Expiration Index | **Partial** | `68fbaf9` | `test_drone_security.py::test_e8_telemetry_ttl_index_configuration`, `backend/test/security.test.js` | Mongoose schema TTL index configured on `timestamp` with `expireAfterSeconds` defaulting to 7 days (`604800` seconds). Marked Partial per ground rule because full live index assertion requires an active MongoDB daemon to create a real collection and verify `db.telemetries.getIndexes()`. |
+| **E9** | Safety | Missing Command Acknowledgement, Command IDs & Failsafe Guards | **Partial** | `9dc3891` | `test_drone_security.py::test_e9_physical_drone_safety_controls_and_state_machine`, `backend/test/security.test.js` | Commands assigned UUIDv4 `command_id`; strict FSM lifecycle transitions (`requested` -> `sent` -> `acknowledged` -> `executing` -> `completed`); ACK timeout transitions to `timed_out` verified in commandManager unit tests. Marked Partial needing its own dedicated live HTTP route test for route-level refusal on stale telemetry (>10s) and invalid transitions. |
 | **E10** | Infrastructure | Compose `depends_on` Missing Service Healthchecks (`condition: service_healthy`) | **Closed** | `8d9d326` | `test_drone_security.py::test_e10_e11_docker_compose_and_node_engine_hardening`, `backend/test/security.test.js` | Configured `service_healthy` condition in `backend` depends_on and MongoDB container healthcheck `db.adminCommand('ping')`. |
 | **E11** | Maintenance | Unpinned Minor Version for MongoDB (`mongo:7-jammy`) & Undeclared Node Engine | **Closed** | `8d9d326` | `test_drone_security.py::test_e10_e11_docker_compose_and_node_engine_hardening`, `backend/test/security.test.js` | Pinned Mongo image to `mongo:7.0.14-jammy`; declared `"engines": { "node": ">=20.0.0" }` in `backend/package.json`. |
 | **E12** | Documentation | Contradictory Run Instructions Bypassing Nginx Reverse Proxy | **Closed** | `1958b46` | `test_drone_security.py::test_e12_readme_run_paths_and_proxy_architecture` | Updated README with explicit Docker Compose run path routing all traffic through port 8080 and local dev run paths. |
@@ -66,9 +66,9 @@ In accordance with Ground Rule **R2**, an audit item is marked **Closed** ONLY i
 | ID | Origin / Classification | Description | Status Under R2 | Verification Path | Justification & Requirements |
 |---|---|---|---|---|---|
 | **OP-1** | Added, non-audit | Mobile Camera HTTPS/WSS Transport (`getUserMedia`) | **Closed** | `3f72afa` | `test_security.py::test_mobile_secure_context_enforcement` | Enforces browser Secure Context on GET /mobile; serves informational notice on plain HTTP LAN; MOBILE_ENABLED=false by default. |
-| **OP-2** | Added, non-audit | Docker Network Gateway & Nginx Video Feed Gate (`/video_feed`) | **Partial / Unverified** | `441b680` | `test_drone_security.py::test_op2_nginx_reverse_proxy_topology_and_video_gate`, `backend/test/security.test.js` | Nginx reverse-proxy configuration gates /video_feed, disables buffering, sets 86400s timeouts; Docker runtime test required (R3). |
+| **OP-2** | Added, non-audit | Docker Network Gateway & Nginx Video Feed Gate (`/video_feed`) | **Unverified (Docker)** | `441b680` | `nginx.conf` reverse proxy configuration | Nginx reverse-proxy configuration gates /video_feed, disables buffering, sets 86400s timeouts. Statically verified in configuration; marked Unverified (Docker) per R3 pending live container runtime testing. |
 | **OP-3** | Added, non-audit | Trusted Proxy Topology Verification | **Closed** | `441b680`, `87fad7b` | `test_drone_security.py::test_op3_trusted_proxy_topology_and_spoofing_prevention`, `test_security.py::test_network_defaults_and_localhost_binding` | Exact IP matching enforced; empty default prevents IP spoofing in both Detection and EcoWing; tests assert untrusted peer cannot spoof X-Forwarded-For. |
-| **OP-MONGO-AUTH** | Added, non-audit | Mongo `--auth` Container Flag Enforcement | **Partial / Unverified** | `8d9d326` | `test_drone_security.py::test_e10_e11_docker_compose_and_node_engine_hardening` | `--auth` flag configured in compose; requires Docker daemon to verify container runtime. |
+| **OP-MONGO-AUTH** | Added, non-audit | Mongo `--auth` Container Flag Enforcement | **Unverified (Docker)** | `8d9d326` | `docker-compose.yml` static config check | `--auth` flag configured in compose; requires Docker daemon to verify container runtime (R3). |
 | **OP-SHARED-LOCKOUT** | Added, non-audit | Shared Lockout Under NAT | **Closed** | `1958b46`, `3e585a3` | `test_drone_security.py::test_e12_readme_run_paths_and_proxy_architecture`, ADR 0006 | Decoupled authentication rate limiting from client IP and keyed to session/device token, preventing collateral lockouts for multiple field units behind shared NAT router. |
 | **OP-LINE-ENDINGS** | Added, non-audit | Line-Ending Normalization (CRLF vs LF) | **Closed** | `d996a06`, `09db7c1` | `git ls-files --eol` across all tracked files | Mandated by Ground Rule R7. Enforced by `.gitattributes` (`* text=auto eol=lf`) to eliminate line-ending churn across platforms. |
 
@@ -77,14 +77,16 @@ In accordance with Ground Rule **R2**, an audit item is marked **Closed** ONLY i
 ## 3. Summary of Status Counts
 
 - **Authoritative Items from AUDIT.md:** 37
-  - **Closed:** 35 (E1, E2, E3, E6, E7, E8, E9, E10, E11, E12, E13, E-NEW1, E-NEW2, I1, I2, I3, I4, I5, D1, D2, D3, D4, D5, D6, D7, D8, D9, D10, D11, D12, D13, D14, D15, D16, D-NEW1)
-  - **Partial / Unverified (Docker Runtime Blockers per R3):** 2 (E4, E5)
+  - **Closed:** 33 (E1, E2, E3, E6, E7, E10, E11, E12, E13, E-NEW1, E-NEW2, I1, I2, I3, I4, I5, D1, D2, D3, D4, D5, D6, D7, D8, D9, D10, D11, D12, D13, D14, D15, D16, D-NEW1)
+  - **Partial:** 2 (E8 [TTL Live Index], E9 [Route-Level Refusal])
+  - **Unverified (Docker Blockers per R3):** 2 (E4, E5)
   - **Open:** 0
 - **Added, Non-Audit Operational Items:** 6
   - **Closed:** 4 (OP-1, OP-3, OP-SHARED-LOCKOUT, OP-LINE-ENDINGS)
-  - **Partial / Unverified (Docker Runtime Blockers per R3):** 2 (OP-2, OP-MONGO-AUTH)
+  - **Unverified (Docker Blockers per R3):** 2 (OP-2, OP-MONGO-AUTH)
   - **Open:** 0
 - **Grand Total Rows:** 43
-  - **Closed:** 39
-  - **Partial / Unverified (Docker Runtime Blockers):** 4 (E4, E5, OP-2, OP-MONGO-AUTH)
+  - **Closed:** 37
+  - **Partial:** 2 (E8, E9)
+  - **Unverified (Docker Blockers per R3):** 4 (E4, E5, OP-2, OP-MONGO-AUTH)
   - **Open:** 0
