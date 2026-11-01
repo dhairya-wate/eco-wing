@@ -22,7 +22,7 @@ from app import (
     active_mobile_websockets, pending_mobile_websockets,
     CLOSE_REASONS, MAX_MOBILE_WS_CONNECTIONS
 )
-from config import MAX_UPLOAD_SIZE_BYTES
+from config import MAX_UPLOAD_SIZE_BYTES, BASE_DIR
 import asyncio
 import websockets
 from conftest import TEST_OPERATOR_TOKEN
@@ -621,5 +621,56 @@ async def test_ws_max_message_size_transport_rejection_code_1009():
     finally:
         proc.terminate()
         proc.wait()
+
+
+def test_network_defaults_and_localhost_binding():
+    """
+    Verifies that:
+    1. Default network binding is strictly 127.0.0.1 (localhost).
+    2. LAN exposure requires explicit ALLOW_LAN=true opt-in (binding 0.0.0.0).
+    3. Default TRUSTED_PROXIES is an empty set, ignoring X-Forwarded-For until verified.
+    4. start_tunnel.bat is permanently disabled and terminates immediately with error code 1.
+    """
+    # 1. Verify default host binding in isolated subprocess without ALLOW_LAN
+    code = (
+        "import os\n"
+        "os.environ.pop('ALLOW_LAN', None)\n"
+        "os.environ.pop('HOST', None)\n"
+        "os.environ.pop('DETECTION_TRUSTED_PROXIES', None)\n"
+        "os.environ.pop('TRUSTED_PROXIES', None)\n"
+        "import config\n"
+        "assert config.DEFAULT_HOST == '127.0.0.1', f'Expected 127.0.0.1, got {config.DEFAULT_HOST}'\n"
+        "assert config.ALLOW_LAN is False\n"
+        "assert config.TRUSTED_PROXIES == set(), f'Expected empty set, got {config.TRUSTED_PROXIES}'\n"
+    )
+    env = os.environ.copy()
+    env.pop("ALLOW_LAN", None)
+    env.pop("HOST", None)
+    env.pop("DETECTION_TRUSTED_PROXIES", None)
+    env.pop("TRUSTED_PROXIES", None)
+    res_default = subprocess.run([sys.executable, "-c", code], env=env, capture_output=True, text=True)
+    assert res_default.returncode == 0, f"Default config failed: {res_default.stderr}"
+
+    # 2. Verify ALLOW_LAN=true enables 0.0.0.0 binding
+    code_lan = (
+        "import os\n"
+        "os.environ['ALLOW_LAN'] = 'true'\n"
+        "os.environ.pop('HOST', None)\n"
+        "import config\n"
+        "assert config.DEFAULT_HOST == '0.0.0.0', f'Expected 0.0.0.0, got {config.DEFAULT_HOST}'\n"
+        "assert config.ALLOW_LAN is True\n"
+    )
+    env_lan = os.environ.copy()
+    env_lan["ALLOW_LAN"] = "true"
+    env_lan.pop("HOST", None)
+    res_lan = subprocess.run([sys.executable, "-c", code_lan], env=env_lan, capture_output=True, text=True)
+    assert res_lan.returncode == 0, f"ALLOW_LAN config failed: {res_lan.stderr}"
+
+    # 3. Verify start_tunnel.bat is permanently disabled
+    tunnel_script = BASE_DIR / "start_tunnel.bat"
+    assert tunnel_script.exists()
+    content = tunnel_script.read_text(encoding="utf-8")
+    assert "PERMANENTLY DISABLED" in content
+    assert "exit /b 1" in content
 
 
