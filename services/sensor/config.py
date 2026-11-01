@@ -57,6 +57,12 @@ DEFAULT_SOURCE = os.getenv("DETECTION_SOURCE", os.getenv("VIDEO_SOURCE", "simula
 DETECTION_MAX_FPS = float(os.getenv("DETECTION_MAX_FPS", "5.0"))
 DETECTION_STALE_AFTER_SECONDS = float(os.getenv("DETECTION_STALE_AFTER_SECONDS", "5.0"))
 
+# EcoWing Ingestion & Outbox Configuration
+ECOWING_INGEST_URL = os.getenv("ECOWING_INGEST_URL", "")
+ECOWING_DEVICE_TOKEN = os.getenv("ECOWING_DEVICE_TOKEN", "")
+DRONE_ID = os.getenv("DRONE_ID", "EcoWing-01")
+OUTBOX_DB_PATH = BASE_DIR / "data" / "outbox.db"
+
 # CORS Configuration: Explicit origin allowlist (wildcard with credentials rejected)
 _raw_cors = os.getenv(
     "CORS_ORIGINS",

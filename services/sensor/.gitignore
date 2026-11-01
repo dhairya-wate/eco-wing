@@ -41,3 +41,9 @@ npm-debug.log*
 # Vercel
 .vercel
 
+# Databases & Outbox Store
+*.db
+*.sqlite3
+data/
+
+

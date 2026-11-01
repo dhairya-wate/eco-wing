@@ -60,12 +60,18 @@ from config import (
 )
 from detector import WasteDetector
 from video_stream import VideoStreamManager
+from outbox import OutboxQueue, OutboxSender
+
+outbox_queue = OutboxQueue()
+outbox_sender = OutboxSender(queue=outbox_queue)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Lifespan context manager: starts background detection worker on startup and terminates on exit."""
+    """Lifespan context manager: starts background detection worker and outbox sender on startup and terminates on exit."""
     worker.start()
+    outbox_sender.start()
     yield
+    outbox_sender.stop()
     worker.stop()
 
 app = FastAPI(
@@ -117,7 +123,8 @@ stream_mgr = VideoStreamManager(source=DEFAULT_SOURCE)
 worker = DetectionWorker(
     detector=detector,
     stream_mgr=stream_mgr,
-    watermark=f"{LOCAL_IP}:{DEFAULT_PORT}"
+    watermark=f"{LOCAL_IP}:{DEFAULT_PORT}",
+    outbox_queue=outbox_queue
 )
 active_websockets = set()
 active_mobile_websockets = set()

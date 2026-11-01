@@ -35,12 +35,23 @@ class DetectionWorker:
         remainder of the frame interval: max(0.001, (1.0 / self.fps_limit) - elapsed).
     """
 
-    def __init__(self, detector, stream_mgr, watermark: str = "127.0.0.1:5000", fps_limit: float = DETECTION_MAX_FPS):
+    def __init__(
+        self,
+        detector,
+        stream_mgr,
+        watermark: str = "127.0.0.1:5000",
+        fps_limit: float = DETECTION_MAX_FPS,
+        outbox_queue=None,
+        drone_id: str = "EcoWing-01"
+    ):
         self.detector = detector
         self.stream_mgr = stream_mgr
         self.watermark = watermark
         self.fps_limit = max(1.0, float(fps_limit))
         self.interval = 1.0 / self.fps_limit
+        self.outbox_queue = outbox_queue
+        self.drone_id = drone_id
+        self.last_outbox_time = 0.0
         self.is_running = False
         self.thread: Optional[threading.Thread] = None
         self.lock = threading.Lock()
@@ -106,6 +117,20 @@ class DetectionWorker:
                         self.latest_summary = summary
                         self.last_update_time = now
                         self.inference_count += 1
+
+                    if self.outbox_queue is not None and summary.get("items"):
+                        if now - self.last_outbox_time >= 1.0:
+                            try:
+                                from outbox import create_detection_event
+                                event = create_detection_event(
+                                    drone_id=self.drone_id,
+                                    source="mobile" if getattr(self.stream_mgr, "is_mobile_active", False) else "camera",
+                                    items=summary.get("items", [])
+                                )
+                                self.outbox_queue.enqueue(event)
+                                self.last_outbox_time = now
+                            except Exception as oe:
+                                logger.warning("Failed to enqueue detection event to outbox: %s", oe)
                 else:
                     # Source failure / offline camera: log warning and continue safely
                     logger.warning("VideoStreamManager returned empty or None frame in DetectionWorker loop.")
