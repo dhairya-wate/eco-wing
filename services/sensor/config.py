@@ -108,268 +108,266 @@ DEFAULT_CONFIDENCE = 0.35
 DEFAULT_IOU_THRESHOLD = 0.45
 
 # Waste Taxonomy & Classification Dictionary
-# Defines categories, recyclability, biodegradability, and recommended disposal bins.
-WASTE_TAXONOMY = {
-    # Direct waste classes (from custom waste models like TrashNet / TACO / Roboflow)
-    "paper": {
-        "display_name": "Paper Waste",
-        "category": "Paper",
-        "recyclable": True,
-        "biodegradable": True,
-        "bin": "Blue Bin (Paper/Dry)",
-        "color": (235, 160, 52),     # BGR
-        "bg_badge": "#3498db"
-    },
-    "cardboard": {
-        "display_name": "Cardboard Box / Scrap",
-        "category": "Cardboard",
-        "recyclable": True,
-        "biodegradable": True,
-        "bin": "Blue Bin (Paper/Dry)",
-        "color": (139, 105, 20),
-        "bg_badge": "#8e44ad"
-    },
-    "glass": {
-        "display_name": "Glass Scrap / Bottle",
-        "category": "Glass",
-        "recyclable": True,
-        "biodegradable": False,
-        "bin": "Cyan Bin (Glass)",
-        "color": (255, 191, 0),
-        "bg_badge": "#00bcd4"
-    },
-    "metal": {
-        "display_name": "Metal / Tin Scrap",
-        "category": "Metal",
-        "recyclable": True,
-        "biodegradable": False,
-        "bin": "Yellow Bin (Metals)",
-        "color": (0, 215, 255),
-        "bg_badge": "#f1c40f"
-    },
-    "can": {
-        "display_name": "Beverage Can / Aluminum",
-        "category": "Metal",
-        "recyclable": True,
-        "biodegradable": False,
-        "bin": "Yellow Bin (Metals)",
-        "color": (0, 215, 255),
-        "bg_badge": "#f1c40f"
-    },
-    "plastic": {
-        "display_name": "Plastic Scrap / Container",
-        "category": "Plastic",
-        "recyclable": True,
-        "biodegradable": False,
-        "bin": "Blue Bin (Plastics)",
-        "color": (0, 140, 255),
-        "bg_badge": "#e67e22"
-    },
-    "trash": {
-        "display_name": "General Waste / Trash",
-        "category": "General",
-        "recyclable": False,
-        "biodegradable": False,
-        "bin": "Black Bin (Landfill)",
-        "color": (128, 128, 128),
-        "bg_badge": "#7f8c8d"
-    },
-    "compost": {
-        "display_name": "Organic / Compostable Scrap",
-        "category": "Organic",
-        "recyclable": False,
-        "biodegradable": True,
-        "bin": "Green Bin (Compost)",
-        "color": (50, 205, 50),
-        "bg_badge": "#2ecc71"
-    },
+TAXONOMY_VERSION = "1.0.0"
+CLASSIFICATION_METHOD = "coco_mapping"
+ALLOWED_CLASSIFICATION_VALUES = {"yes", "no", "estimated", "depends", "unknown"}
 
-    # Standard COCO object mappings -> Approximate Waste Counterparts
+# COCO-to-Waste Mapping Table
+# Note: The model is a general-purpose COCO object detector (yolo26n).
+# It does NOT directly detect materials such as paper, glass, cans, or plastic.
+# Instead, supported COCO object classes are mapped to waste categories and properties.
+# Each entry strictly defines:
+#   coco_label, category, material ("unknown"), recyclable, biodegradable,
+#   classification_method ("coco_mapping"), and model_supported (True).
+COCO_WASTE_MAPPING = {
     "bottle": {
-        "display_name": "Plastic / Glass Bottle",
-        "category": "Plastic / Glass",
-        "recyclable": True,
-        "biodegradable": False,
-        "bin": "Blue Bin (Plastics/Glass)",
+        "coco_label": "bottle",
+        "category": "Container",
+        "material": "unknown",
+        "recyclable": "depends",
+        "biodegradable": "no",
+        "classification_method": "coco_mapping",
+        "model_supported": True,
+        "display_name": "Bottle",
+        "bin": "Blue / Cyan Bin (Plastics/Glass)",
         "color": (0, 140, 255),
         "bg_badge": "#06b6d4"
     },
+    "cup": {
+        "coco_label": "cup",
+        "category": "Container",
+        "material": "unknown",
+        "recyclable": "depends",
+        "biodegradable": "depends",
+        "classification_method": "coco_mapping",
+        "model_supported": True,
+        "display_name": "Cup",
+        "bin": "Yellow / Blue Bin (Metals/Paper)",
+        "color": (0, 215, 255),
+        "bg_badge": "#06b6d4"
+    },
     "wine glass": {
-        "display_name": "Glassware / Glass Scrap",
-        "category": "Glass",
-        "recyclable": True,
-        "biodegradable": False,
+        "coco_label": "wine glass",
+        "category": "Glassware",
+        "material": "unknown",
+        "recyclable": "yes",
+        "biodegradable": "no",
+        "classification_method": "coco_mapping",
+        "model_supported": True,
+        "display_name": "Wine Glass / Glassware",
         "bin": "Cyan Bin (Glass)",
         "color": (255, 191, 0),
-        "bg_badge": "#00e5ff"
-    },
-    "cup": {
-        "display_name": "Beverage Cup / Can",
-        "category": "Metal / Paper",
-        "recyclable": True,
-        "biodegradable": False,
-        "bin": "Yellow Bin (Metals/Paper)",
-        "color": (0, 215, 255),
-        "bg_badge": "#f59e0b"
+        "bg_badge": "#06b6d4"
     },
     "fork": {
-        "display_name": "Disposable Cutlery (Fork)",
-        "category": "Plastic / Metal",
-        "recyclable": True,
-        "biodegradable": False,
+        "coco_label": "fork",
+        "category": "Cutlery",
+        "material": "unknown",
+        "recyclable": "depends",
+        "biodegradable": "no",
+        "classification_method": "coco_mapping",
+        "model_supported": True,
+        "display_name": "Cutlery Scrap (Fork)",
         "bin": "Yellow / Blue Bin",
-        "color": (200, 200, 200),
+        "color": (192, 192, 192),
         "bg_badge": "#64748b"
     },
     "knife": {
-        "display_name": "Disposable Cutlery (Knife)",
-        "category": "Plastic / Metal",
-        "recyclable": True,
-        "biodegradable": False,
+        "coco_label": "knife",
+        "category": "Cutlery",
+        "material": "unknown",
+        "recyclable": "depends",
+        "biodegradable": "no",
+        "classification_method": "coco_mapping",
+        "model_supported": True,
+        "display_name": "Cutlery Scrap (Knife)",
         "bin": "Yellow / Blue Bin",
-        "color": (200, 200, 200),
+        "color": (192, 192, 192),
         "bg_badge": "#64748b"
     },
     "spoon": {
-        "display_name": "Disposable Cutlery (Spoon)",
-        "category": "Plastic / Metal",
-        "recyclable": True,
-        "biodegradable": False,
+        "coco_label": "spoon",
+        "category": "Cutlery",
+        "material": "unknown",
+        "recyclable": "depends",
+        "biodegradable": "no",
+        "classification_method": "coco_mapping",
+        "model_supported": True,
+        "display_name": "Cutlery Scrap (Spoon)",
         "bin": "Yellow / Blue Bin",
-        "color": (200, 200, 200),
+        "color": (192, 192, 192),
         "bg_badge": "#64748b"
     },
     "bowl": {
-        "display_name": "Bowl / Food Container",
-        "category": "Plastic / Ceramic",
-        "recyclable": True,
-        "biodegradable": False,
-        "bin": "Recyclable Waste",
-        "color": (160, 160, 160),
+        "coco_label": "bowl",
+        "category": "Container",
+        "material": "unknown",
+        "recyclable": "depends",
+        "biodegradable": "no",
+        "classification_method": "coco_mapping",
+        "model_supported": True,
+        "display_name": "Bowl / Dishware",
+        "bin": "Mixed Waste Bin",
+        "color": (200, 200, 200),
         "bg_badge": "#64748b"
     },
     "banana": {
-        "display_name": "Banana Peel / Fruit Scrap",
+        "coco_label": "banana",
         "category": "Organic",
-        "recyclable": False,
-        "biodegradable": True,
+        "material": "unknown",
+        "recyclable": "no",
+        "biodegradable": "yes",
+        "classification_method": "coco_mapping",
+        "model_supported": True,
+        "display_name": "Fruit Peel / Scrap (Banana)",
         "bin": "Green Bin (Compost)",
         "color": (0, 255, 255),
         "bg_badge": "#10b981"
     },
     "apple": {
-        "display_name": "Apple Core / Fruit Scrap",
+        "coco_label": "apple",
         "category": "Organic",
-        "recyclable": False,
-        "biodegradable": True,
+        "material": "unknown",
+        "recyclable": "no",
+        "biodegradable": "yes",
+        "classification_method": "coco_mapping",
+        "model_supported": True,
+        "display_name": "Fruit Core / Scrap (Apple)",
         "bin": "Green Bin (Compost)",
         "color": (0, 0, 255),
         "bg_badge": "#10b981"
     },
     "sandwich": {
-        "display_name": "Food Scrap / Bread",
+        "coco_label": "sandwich",
         "category": "Organic",
-        "recyclable": False,
-        "biodegradable": True,
+        "material": "unknown",
+        "recyclable": "no",
+        "biodegradable": "yes",
+        "classification_method": "coco_mapping",
+        "model_supported": True,
+        "display_name": "Food Scrap (Sandwich)",
         "bin": "Green Bin (Compost)",
-        "color": (34, 139, 34),
+        "color": (42, 42, 165),
         "bg_badge": "#10b981"
     },
     "orange": {
-        "display_name": "Orange Peel / Citrus",
+        "coco_label": "orange",
         "category": "Organic",
-        "recyclable": False,
-        "biodegradable": True,
+        "material": "unknown",
+        "recyclable": "no",
+        "biodegradable": "yes",
+        "classification_method": "coco_mapping",
+        "model_supported": True,
+        "display_name": "Fruit Peel (Orange)",
         "bin": "Green Bin (Compost)",
         "color": (0, 165, 255),
         "bg_badge": "#10b981"
     },
     "broccoli": {
-        "display_name": "Vegetable Scrap (Broccoli)",
+        "coco_label": "broccoli",
         "category": "Organic",
-        "recyclable": False,
-        "biodegradable": True,
+        "material": "unknown",
+        "recyclable": "no",
+        "biodegradable": "yes",
+        "classification_method": "coco_mapping",
+        "model_supported": True,
+        "display_name": "Vegetable Scrap (Broccoli)",
         "bin": "Green Bin (Compost)",
         "color": (34, 139, 34),
         "bg_badge": "#10b981"
     },
     "carrot": {
-        "display_name": "Vegetable Scrap (Carrot)",
+        "coco_label": "carrot",
         "category": "Organic",
-        "recyclable": False,
-        "biodegradable": True,
+        "material": "unknown",
+        "recyclable": "no",
+        "biodegradable": "yes",
+        "classification_method": "coco_mapping",
+        "model_supported": True,
+        "display_name": "Vegetable Scrap (Carrot)",
         "bin": "Green Bin (Compost)",
         "color": (0, 140, 255),
         "bg_badge": "#10b981"
     },
-    "pizza": {
-        "display_name": "Pizza Crust / Food Waste",
+    "hot dog": {
+        "coco_label": "hot dog",
         "category": "Organic",
-        "recyclable": False,
-        "biodegradable": True,
+        "material": "unknown",
+        "recyclable": "no",
+        "biodegradable": "yes",
+        "classification_method": "coco_mapping",
+        "model_supported": True,
+        "display_name": "Food Scrap (Hot Dog)",
+        "bin": "Green Bin (Compost)",
+        "color": (34, 139, 34),
+        "bg_badge": "#10b981"
+    },
+    "pizza": {
+        "coco_label": "pizza",
+        "category": "Organic",
+        "material": "unknown",
+        "recyclable": "no",
+        "biodegradable": "yes",
+        "classification_method": "coco_mapping",
+        "model_supported": True,
+        "display_name": "Food Scrap (Pizza)",
         "bin": "Green Bin (Compost)",
         "color": (0, 69, 255),
         "bg_badge": "#10b981"
     },
     "donut": {
-        "display_name": "Pastry / Food Scrap",
+        "coco_label": "donut",
         "category": "Organic",
-        "recyclable": False,
-        "biodegradable": True,
+        "material": "unknown",
+        "recyclable": "no",
+        "biodegradable": "yes",
+        "classification_method": "coco_mapping",
+        "model_supported": True,
+        "display_name": "Food Scrap (Donut)",
         "bin": "Green Bin (Compost)",
         "color": (147, 20, 255),
         "bg_badge": "#10b981"
     },
     "cake": {
-        "display_name": "Bakery Food Scrap",
+        "coco_label": "cake",
         "category": "Organic",
-        "recyclable": False,
-        "biodegradable": True,
+        "material": "unknown",
+        "recyclable": "no",
+        "biodegradable": "yes",
+        "classification_method": "coco_mapping",
+        "model_supported": True,
+        "display_name": "Food Scrap (Cake)",
         "bin": "Green Bin (Compost)",
         "color": (180, 105, 255),
         "bg_badge": "#10b981"
     },
     "book": {
-        "display_name": "Paper / Book Scrap",
-        "category": "Paper",
-        "recyclable": True,
-        "biodegradable": True,
+        "coco_label": "book",
+        "category": "Paper/Reading",
+        "material": "unknown",
+        "recyclable": "yes",
+        "biodegradable": "yes",
+        "classification_method": "coco_mapping",
+        "model_supported": True,
+        "display_name": "Book / Reading Scrap",
         "bin": "Blue Bin (Paper/Dry)",
         "color": (235, 160, 52),
         "bg_badge": "#3b82f6"
     }
 }
 
-ALIASES = {
-    "cans": "can",
-    "tin": "can",
-    "aluminum": "can",
-    "tin can": "can",
-    "cardboard box": "cardboard",
-    "carton": "cardboard",
-    "paper cup": "cup",
-    "newspaper": "paper",
-    "magazine": "paper",
-    "pet bottle": "bottle",
-    "plastic bottle": "bottle",
-    "glass bottle": "glass",
-    "glassware": "glass"
-}
+# Alias for backwards compatibility
+WASTE_TAXONOMY = COCO_WASTE_MAPPING
 
 def resolve_waste_item(class_name: str):
     """
-    Returns waste taxonomy information if class_name is a recognized waste item.
-    Returns None if class_name is NOT considered waste (e.g. person, chair, dog, etc.).
+    Returns waste taxonomy information if class_name is a mapped COCO waste item.
+    Only mapped COCO labels produce waste items. Unmapped COCO labels return None.
     """
+    if not class_name or not isinstance(class_name, str):
+        return None
     clean_name = class_name.lower().strip()
-    if clean_name in WASTE_TAXONOMY:
-        return WASTE_TAXONOMY[clean_name]
-    if clean_name in ALIASES:
-        target = ALIASES[clean_name]
-        if target in WASTE_TAXONOMY:
-            return WASTE_TAXONOMY[target]
-    for key, data in WASTE_TAXONOMY.items():
-        if key in clean_name or clean_name in key:
-            return data
+    entry = COCO_WASTE_MAPPING.get(clean_name)
+    if entry is not None:
+        return entry.copy()
     return None
-

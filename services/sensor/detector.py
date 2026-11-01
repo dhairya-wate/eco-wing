@@ -2,7 +2,7 @@ import cv2
 import numpy as np
 import time
 from ultralytics import YOLO
-from config import MODEL_PATH, DEFAULT_CONFIDENCE, DEFAULT_IOU_THRESHOLD, resolve_waste_item
+from config import MODEL_PATH, DEFAULT_CONFIDENCE, DEFAULT_IOU_THRESHOLD, resolve_waste_item, TAXONOMY_VERSION, CLASSIFICATION_METHOD
 
 class WasteDetector:
     def __init__(self, model_path=None, confidence=DEFAULT_CONFIDENCE, iou=DEFAULT_IOU_THRESHOLD):
@@ -55,24 +55,30 @@ class WasteDetector:
                 coords = box.xyxy[0].cpu().numpy().astype(int)
                 x1, y1, x2, y2 = int(coords[0]), int(coords[1]), int(coords[2]), int(coords[3])
                 
-                # Update statistics
-                if taxonomy["recyclable"]:
+                # Update statistics (handling string enum values)
+                rec_val = str(taxonomy["recyclable"]).lower()
+                if rec_val in ("yes", "estimated", "true"):
                     recyclable_count += 1
                 else:
                     non_recyclable_count += 1
                     
-                if taxonomy["biodegradable"]:
+                bio_val = str(taxonomy["biodegradable"]).lower()
+                if bio_val in ("yes", "estimated", "true"):
                     biodegradable_count += 1
                 else:
                     non_biodegradable_count += 1
                 
                 item_info = {
                     "raw_class": raw_class_name,
+                    "coco_label": taxonomy.get("coco_label", raw_class_name),
                     "name": taxonomy["display_name"],
                     "category": taxonomy["category"],
+                    "material": taxonomy.get("material", "unknown"),
                     "confidence": round(conf * 100, 1),
                     "recyclable": taxonomy["recyclable"],
                     "biodegradable": taxonomy["biodegradable"],
+                    "classification_method": taxonomy.get("classification_method", CLASSIFICATION_METHOD),
+                    "model_supported": taxonomy.get("model_supported", True),
                     "bin": taxonomy["bin"],
                     "bbox": [x1, y1, x2, y2]
                 }
@@ -86,6 +92,8 @@ class WasteDetector:
                            biodegradable_count, server_info)
 
         summary = {
+            "taxonomy_version": TAXONOMY_VERSION,
+            "classification_method": CLASSIFICATION_METHOD,
             "total_count": len(detected_waste),
             "recyclable_count": recyclable_count,
             "non_recyclable_count": non_recyclable_count,
@@ -132,11 +140,13 @@ class WasteDetector:
         cv2.putText(img, header_text, (x1 + 6, badge_y + 13), font, font_scale, (0, 0, 0), font_thick, cv2.LINE_AA)
         
         # Sub-badges for Recyclable and Biodegradable
-        rec_status = "REC: YES" if item["recyclable"] else "REC: NO"
-        rec_bg = (39, 174, 96) if item["recyclable"] else (41, 128, 185) # Green vs Dark Blue
+        rec_str = str(item["recyclable"]).upper()
+        rec_status = f"REC: {rec_str}"
+        rec_bg = (39, 174, 96) if rec_str in ("YES", "ESTIMATED", "TRUE") else (41, 128, 185)
         
-        bio_status = "BIO: YES" if item["biodegradable"] else "BIO: NO"
-        bio_bg = (39, 174, 96) if item["biodegradable"] else (52, 73, 94) # Green vs Slate
+        bio_str = str(item["biodegradable"]).upper()
+        bio_status = f"BIO: {bio_str}"
+        bio_bg = (39, 174, 96) if bio_str in ("YES", "ESTIMATED", "TRUE") else (52, 73, 94)
         
         sub_y = badge_y + 20
         # Recyclable badge
