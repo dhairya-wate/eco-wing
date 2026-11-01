@@ -1,187 +1,163 @@
-# EcoWing Command Center: Full-Stack Architecture & Deployment Guide
+# EcoWing Fleet Command Center: Full-Stack Architecture & Deployment Guide
 
-This package deploys the complete EcoWing Command Center: a static frontend dashboard served by nginx, a Node.js + Express + Socket.IO backend, and a MongoDB database for storing detection events, drone telemetry logs, and fleet state.
+The authoritative **Command and Control Center** for the EcoWing Autonomous Drone Fleet. It hosts the pilot dashboard, manages flight command dispatch with strict finite state machine (FSM) safety controls, aggregates real-time drone telemetry, and ingests edge AI waste detection events.
 
-```
-EcoWing/
-├── backend/
-│   ├── middleware/
-│   │   └── auth.js             # Operator and per-drone device token verification (E1, E2, E3)
-│   ├── models/
-│   │   ├── Detection.js        # Mongoose schema for waste detection events
-│   │   ├── Drone.js            # Mongoose schema for fleet drones & active status
-│   │   └── Telemetry.js        # Mongoose schema for GPS, battery & sensor history
-│   ├── routes/
-│   │   ├── api.js              # Dashboard REST endpoints (/stats, /events, /chart_data, /telemetry, etc.)
-│   │   └── drone.js            # Ingestion endpoints for connected drones (/telemetry, /detection, /stream-frame)
-│   ├── server.js               # Express + Socket.IO server + MongoDB connection
-│   ├── videoStream.js          # MJPEG live camera stream distributor (/video_feed)
-│   ├── Dockerfile              # Backend container definition
-│   └── package.json            # Node.js dependencies
-├── index.html                  # Hardened command center dashboard
-├── config.js                   # Per-environment frontend settings
-├── docker-compose.yml          # Hardened stack: web (nginx) + backend (Node) + mongodb (Mongo 7)
-├── Dockerfile                  # Web frontend container
-├── nginx.conf                  # Security headers, CSP, /api and /socket.io reverse proxy
-└── README.md
+---
+
+## 🏗️ System Architecture & Data Flow
+
+```mermaid
+flowchart TD
+    subgraph Clients["Operators & Remote Pilots"]
+        Browser["Pilot Dashboard (Web UI)"]
+        Operator["Authorized Flight Operator"]
+    end
+
+    subgraph EdgeBoundary["Reverse Proxy & Gateway (Port 8080)"]
+        Nginx["Nginx Reverse Proxy (nginx.conf)"]
+        VideoGate["Operator Token Gate (/video_feed)"]
+        RateGate["Ingestion & Client Limits"]
+    end
+
+    subgraph BackendCore["EcoWing Backend (Node.js / Express: Port 3000)"]
+        Router["API & Ingestion Router"]
+        AuthMdl["Auth Middleware (Operator & Drone Tokens)"]
+        FSM["Safety Command Manager (UUIDv4 FSM & Freshness Guard)"]
+        RateLmt["Sliding Window Rate Limiter"]
+        Store["DetectionStore (In-Memory / Persistent JSON)"]
+        SocketIO["Socket.IO Server (CORS Restricted)"]
+    end
+
+    subgraph DataTier["Data Persistence Tier (Internal Network)"]
+        Mongo["MongoDB 7.0.14-jammy (--auth enabled)"]
+        TelemetryColl["Telemetry (7-Day TTL Index)"]
+        DetectionColl["Detections (Canonical Event ID Deduplication)"]
+        DroneColl["Drone Fleet State"]
+    end
+
+    subgraph SensorNetwork["Detection Sensor Network (Edge Companion Computer)"]
+        FastAPI["Detection FastAPI (Port 5000)"]
+        Outbox["Persistent SQLite Outbox (outbox.db)"]
+    end
+
+    Browser -->|HTTP / WS| Nginx
+    Operator -->|X-Operator-Token| Nginx
+    Nginx -->|Reverse Proxy| Router
+    Nginx -->|Gated Stream| VideoGate
+    VideoGate -->|Proxy to 5000| FastAPI
+    Outbox -->|X-Drone-Token Auth POST| Router
+    Router --> AuthMdl
+    AuthMdl --> RateLmt
+    RateLmt --> FSM
+    FSM --> SocketIO
+    Router --> Store
+    Store --> DetectionColl
+    Router --> TelemetryColl
+    Router --> DroneColl
 ```
 
 ---
 
-## 1. Stack Overview & Security Architecture
+## 🔒 Trust Boundaries & Network Topology
 
-- **Canonical Deployment:** The EcoWing Command Center dashboard runs locally behind Nginx (port `8080`).
-- **Remote Access via VPN:** Remote operators connecting from outside the local network must use an encrypted VPN (such as WireGuard or Tailscale). The backend port (3000) and MongoDB (27017) are strictly internal to the Docker network and must not be exposed to the host or public internet.
-- **Operator Authentication (`ECOWING_OPERATOR_TOKEN`):** Sensitive operations (`POST /api/drone/connect`, `POST /api/drone/command`, `POST /api/camera/command`, `POST /api/drone/select`, `POST /api/feed/clear`, `GET /api/export/csv`, `GET /api/export/json`) strictly require the operator token in the `X-Operator-Token` header. Startup validation enforces a minimum of 32 characters, 12 unique characters, and non-repeating entropy.
-- **E2 Ingestion Auth (Per-Drone Device Token):** Drone telemetry (`POST /api/drone/telemetry`), detections (`POST /api/drone/detection`), and camera frames (`POST /api/drone/stream-frame`) strictly require a per-drone device token in `X-Drone-Token` or `Authorization: Bearer <token>`. Configured strictly via environment variables (`DRONE_DEVICE_TOKENS` or `DRONE_TOKEN_<DRONE_ID>`) and verified using constant-time cryptographic comparison (`crypto.timingSafeEqual`). A token issued for Drone A cannot post as Drone B.
-- **Target Address Allowlist (`DRONE_TARGET_ALLOWLIST`) & Anti-SSRF:** The "Connect Drone" target address is strictly checked against the `DRONE_TARGET_ALLOWLIST` environment variable (default: empty, strict deny-all). All hostnames are resolved, every returned address is checked against the allowlist (preventing DNS rebinding attacks), and HTTP connections are made directly to the verified IP with redirects strictly disabled.
-- **LAN Drone Target Protocol Restriction:** Target URLs are restricted to unencrypted HTTP (`http://`). HTTPS targets are rejected because internal/LAN IP addresses do not have publicly-trusted TLS certificates, avoiding TLS handshake failures and MITM vulnerabilities.
-- **E1 Drone & Camera Command Sanitization:** Drone commands are strictly restricted to `start`, `hold`, `rth`, `land`. Camera commands are restricted to `photo`, `record`, `zoom`, `track` with strict type and numeric range checks (e.g. zoom: 1.0 to 10.0). `drone_id` identifiers are enforced to alphanumeric with hyphens/underscores (max 64 chars).
-- **E2 Telemetry Bounds Validation:** Ingested drone telemetry (`POST /api/drone/telemetry`) strictly validates numeric bounds for coordinates (latitude [-90, 90], longitude [-180, 180]), battery [0, 100]%, altitude [-100, 10000]m, speed [0, 100]m/s, and heading [0, 360]deg. Malformed or out-of-bounds telemetry is rejected with HTTP 400.
-- **E4/E5 Network Exposure Hardening:** In `docker-compose.yml`, host port mappings for `27017` and `3000` have been removed. Root MongoDB credentials and operator tokens are required from environment variables with no default (`${MONGO_INITDB_ROOT_USERNAME:?required}`, `${MONGO_INITDB_ROOT_PASSWORD:?required}`, `${MONGO_URI:?required}`, `${ECOWING_OPERATOR_TOKEN:?required}`). Services are named `web` (nginx), `backend` (Node), and `mongodb` (Mongo 7), with `extra_hosts: - "host.docker.internal:host-gateway"` configured for `web` and `backend`.
-- **E-NEW1 CORS Allowlist & Socket.IO Drone Auth:** Express and Socket.IO connections are strictly restricted to configured browser origins (`http://localhost:8080`, `http://127.0.0.1:8080`, `http://localhost:3000`, `http://127.0.0.1:3000` or `CORS_ORIGINS` env). Socket.IO drone events (`register_drone`, `drone:telemetry`, `drone:detection`, `drone:frame`) require per-drone device token verification.
-- **Operator-Auth Gated Video Stream:** The `/video_feed` proxy route in Nginx and backend is gated behind operator authentication (`X-Operator-Token` header required, returns HTTP 401 when absent or invalid), with `proxy_buffering off`, `proxy_cache off`, and `proxy_read_timeout 86400s`.
-- **Nginx-to-Detection Path Status:** **UNVERIFIED** (Docker is unavailable on test environment). If deploying on a Docker host, verify using `wget` from the `web` container:
-  ```bash
-  docker compose exec web wget -qO- --header="X-Operator-Token: $DETECTION_OPERATOR_TOKEN" http://host.docker.internal:5000/api/system_info
-  ```
-- **Vercel Frontend Demo Notice:** The public Vercel frontend deployment (`https://eco-wing-7pua.vercel.app`) is an unlinked, static demonstration preview only. It is not connected to the local backend, and browsers block HTTPS-to-HTTP local network connections as Mixed Content.
+| Component | Network Binding | Port | Access Rule & Authentication | Trust Boundary |
+| :--- | :--- | :---: | :--- | :--- |
+| **Public Gateway** | Host Network / LAN | `8080` | Nginx reverse proxy. Serves static dashboard, proxies `/api`, `/socket.io`, and `/video_feed`. | Public Gateway / Pilot Edge |
+| **Backend API** | Internal Docker bridge | `3000` | Unmapped to host. Loopback only in local dev (`127.0.0.1`). | Internal Command Service |
+| **MongoDB** | Internal Docker bridge | `27017` | Unmapped to host. Requires `--auth` and user credentials in URI. | Internal Persistence Tier |
+| **Detection Sensor** | Internal Docker bridge | `5000` | Edge sensor node. Loopback only in local dev. Gated via Nginx. | Edge Sensor Node |
+| **Drone Telemetry Link** | HTTP Ingestion | `/api/drone/*` | Enforces `X-Drone-Token` + `X-Drone-Id` per-drone device auth. | Authenticated Device Link |
+| **Operator Commands** | Operator REST | `/api/drone/command` | Enforces `X-Operator-Token` (min 32 chars, high entropy). | Trusted Flight Operator |
 
 ---
 
-## 2. Running with Docker Compose (Recommended)
+## 🏃 Run Paths & Execution Instructions (E12)
 
-Start the stack with environment variables set:
+### 1. Docker Compose Run Path (Recommended Production Deployment)
+In containerized deployment, all client traffic routes through **Nginx on port 8080**. Backend (3000) and MongoDB (27017) are unmapped from the host network.
 
 ```bash
+# 1. Export required environment variables
 export MONGO_INITDB_ROOT_USERNAME=ecowing_admin
-export MONGO_INITDB_ROOT_PASSWORD=your_secure_mongo_password
-export MONGO_URI="mongodb://ecowing_admin:your_secure_mongo_password@mongodb:27017/ecowing?authSource=admin"
-export ECOWING_OPERATOR_TOKEN="your_secure_operator_token_min_32_chars"
-export DRONE_DEVICE_TOKENS='{"Drone-01":"your_drone_device_token_min_32_chars"}'
+export MONGO_INITDB_ROOT_PASSWORD="your_secure_database_password_123"
+export MONGO_URI="mongodb://ecowing_admin:your_secure_database_password_123@mongodb:27017/ecowing?authSource=admin"
+export ECOWING_OPERATOR_TOKEN="your_secure_operator_token_at_least_32_chars_long_123"
+export DRONE_DEVICE_TOKENS='{"Drone-01":"your_secure_drone_token_at_least_32_chars_long_123"}'
 
+# 2. Build and launch container stack
 docker compose up -d --build
 ```
+- **Pilot Dashboard:** `http://localhost:8080`
+- **Nginx Reverse Proxy:** Routes `/api` to `backend:3000`, `/video_feed` to `detection:5000`.
+- **Backend & Database:** Contained strictly within the `ecowing_net` bridge network.
 
-- **Frontend Dashboard**: `http://localhost:8080` (reverse-proxies to backend and Detection)
-- **Backend API**: Internal container network `http://backend:3000` (not published to host)
-- **MongoDB**: Internal container network `mongodb:27017` (not published to host)
+### 2. Local Development Run Path
+For local development without Docker:
+1. Start MongoDB locally with authentication or run in memory mode.
+2. In `EcoWing/backend`:
+   ```bash
+   cp .env.example .env
+   # Edit backend/.env to configure ECOWING_OPERATOR_TOKEN and MONGO_URI
+   npm install
+   npm start
+   ```
+   Backend listens on `http://127.0.0.1:3000`.
+3. In `detction system`:
+   ```bash
+   export DETECTION_OPERATOR_TOKEN="your_secure_operator_token_at_least_32_chars_long_123"
+   python -m uvicorn app:app --host 127.0.0.1 --port 5000
+   ```
+4. Access dashboard via local Nginx or open `http://localhost:3000`.
 
 ---
 
-## 3. Database Configuration & Credential Requirements
+## 🛡️ Security Architecture & Safety Controls
 
-In `backend/.env`, configure your environment:
-```env
-PORT=3000
-MONGO_INITDB_ROOT_USERNAME=ecowing_admin
-MONGO_INITDB_ROOT_PASSWORD=replace-with-a-secure-database-password
-MONGO_URI=mongodb://ecowing_admin:replace-with-a-secure-database-password@mongodb:27017/ecowing?authSource=admin
-ECOWING_OPERATOR_TOKEN=replace_with_min_32_chars_token
-DRONE_DEVICE_TOKENS={"Drone-01":"drone_secret_token_alpha_1234567890"}
-DRONE_TARGET_ALLOWLIST=
-CORS_ORIGINS=http://localhost:8080,http://127.0.0.1:8080
-```
+1. **Physical Drone Safety Controls & FSM State Machine (E9):**
+   - Commands (`/api/drone/command`) require UUIDv4 `command_id` tracking.
+   - Commands follow a strict state machine lifecycle: `requested` -> `sent` -> `acknowledged` -> `executing` -> `completed`.
+   - Illegal state jumps (e.g. `requested` directly to `completed`) are rejected.
+   - **Stale Telemetry Failsafe:** Flight commands are rejected with HTTP 409 Conflict if telemetry has not been updated within 10 seconds.
+   - **ACK Timeout:** Commands transitioning to `sent` arm an ACK timer. If the drone companion computer fails to acknowledge within the window, the command transitions to `timed_out`.
 
-### MongoDB Credential Enforcement & Startup Validation
-EcoWing enforces database authentication. On application startup, `backend/app.js` runs `validateMongoUriConfig(uri)`:
-- `MONGO_URI` is strictly required and must contain user credentials in the format `mongodb://user:password@host...` or `mongodb+srv://user:password@cluster...`.
-- If credentials are missing or the URI is empty, the backend logs a fatal configuration error and terminates immediately.
+2. **Operator Authentication (`ECOWING_OPERATOR_TOKEN`):**
+   - Startup validation enforces a minimum length of 32 characters, 12 unique characters, and non-repeating entropy.
+   - All flight control endpoints (`/api/drone/command`, `/api/camera/command`, `/api/drone/select`, `/api/drone/connect`, `/api/feed/clear`, `/api/export/*`) require `X-Operator-Token`.
 
-### MongoDB Docker First-Start Behavior & Existing Volume Migration
-- **First-Start Behavior:** The `MONGO_INITDB_ROOT_USERNAME` and `MONGO_INITDB_ROOT_PASSWORD` variables in `docker-compose.yml` are evaluated by MongoDB's official image initialization script **only** on initial volume creation when `/data/db` is completely empty.
-- **Existing Volumes:** If an existing volume is mounted, MongoDB skips initialization, and existing data/credentials remain untouched.
-- **Migration for Existing Volumes:** If upgrading an unauthenticated existing MongoDB container:
-  1. *Clean Re-initialization (if data can be cleared):*
-     ```bash
-     docker compose down -v
-     docker compose up -d
-     ```
-  2. *In-place User Creation (preserving existing data):*
-     Connect to the running container and create the admin user via `mongosh`:
-     ```bash
-     docker compose exec mongodb mongosh admin --eval 'db.createUser({user: "ecowing_admin", pwd: "your_secure_password", roles: [{role: "root", db: "admin"}]})'
-     ```
+3. **Per-Drone Device Token Authentication (E2, I5):**
+   - Telemetry ingestion (`/api/drone/telemetry`), detection events (`/api/drone/detection`), and camera frames (`/api/drone/stream-frame`) require `X-Drone-Token` and `X-Drone-Id`.
+   - Verified via constant-time cryptographic comparison (`crypto.timingSafeEqual`).
+   - Cross-drone token reuse (Token A with Drone-B ID) is rejected with HTTP 401.
 
-### Start the Backend Locally:
+4. **Target Address Allowlist & Anti-SSRF (Anti-DNS Rebinding):**
+   - Connecting companion cameras via `stream_url` validates targets against `DRONE_TARGET_ALLOWLIST` (default: empty deny-all).
+   - Hostnames are resolved to IP literals; all returned addresses are checked against the allowlist. Connections target verified IPs directly with HTTP redirects strictly prohibited.
+
+5. **Payload Limits & Ingestion Rate Limiting (E7):**
+   - Maximum JSON/body payload is restricted to 5 MB (returns HTTP 413 Payload Too Large on overflow).
+   - Ingestion endpoints (`/telemetry`, `/detection`, `/stream-frame`) are governed by sliding window rate limits returning HTTP 429 with `Retry-After`.
+
+6. **Telemetry TTL Retention Index (E8):**
+   - Mongoose telemetry schema defines a TTL index on `timestamp` with `expireAfterSeconds` defaulting to 7 days (604,800s), configurable via `TELEMETRY_TTL_SECONDS`.
+
+7. **Detection Event Ingestion & Idempotence (I1):**
+   - Canonical detection events require UUIDv4 `event_id`, source enum, taxonomy version, and normalized confidence in `[0.0, 1.0]`.
+   - Duplicate pushes of the same `event_id` are recognized via `canonical_event_id` index and return `duplicate: true`, preventing duplicate records in storage.
+
+8. **Shared NAT Pairing & Lockout Architecture (OP-SHARED-LOCKOUT):**
+   - Drone device tokens and mobile sessions decouple authentication rate limits from remote IP addresses.
+   - When multiple field units or companion computers share a single cellular NAT gateway, authentication tracking is keyed by authenticated device identifier (`X-Drone-Id`, `session_token`), preventing one malfunctioning unit from locking out other drones sharing the same NAT IP.
+
+---
+
+## 🧪 Automated Testing & Verification
+
+EcoWing maintains automated test coverage across both Node.js and Python test runners:
 ```bash
-cd backend
-npm install
-npm start
+# Run Node.js Test Suite (74 tests)
+npm test --prefix backend
+
+# Run Python Security & Contract Suite (31 tests)
+pytest test_drone_security.py -v
 ```
-
----
-
-## 4. Connecting a Drone to Stream & Store Data
-
-When your drone connects, it streams telemetry, camera frames, and waste detections using its per-drone device token:
-
-### A. Stream Live Telemetry (1–2 Hz)
-**POST** `http://<backend-ip>:3000/api/drone/telemetry`
-Headers:
-- `Content-Type: application/json`
-- `X-Drone-Token: <DRONE_DEVICE_TOKEN>`
-
-```json
-{
-  "drone_id": "Drone-01",
-  "status": "Flying",
-  "battery_pct": 82.5,
-  "battery_voltage": 7.95,
-  "altitude_m": 45.2,
-  "speed_mps": 6.1,
-  "heading_deg": 142,
-  "latitude": 40.7250,
-  "longitude": -73.9790
-}
-```
-
-### B. Record a Waste Detection
-**POST** `http://<backend-ip>:3000/api/drone/detection`
-Headers:
-- `Content-Type: application/json`
-- `X-Drone-Token: <DRONE_DEVICE_TOKEN>`
-
-```json
-{
-  "drone_id": "Drone-01",
-  "class_name": "plastic_bottle",
-  "confidence": 0.94,
-  "location": { "lat": 40.7250, "lng": -73.9790 }
-}
-```
-
-### C. Stream Camera Frames
-**POST** `http://<backend-ip>:3000/api/drone/stream-frame`
-Headers:
-- `Content-Type: application/json`
-- `X-Drone-Token: <DRONE_DEVICE_TOKEN>`
-
-```json
-{
-  "drone_id": "Drone-01",
-  "frame": "<base64_jpeg>"
-}
-```
-
----
-
-## 5. API Endpoints Reference
-
-| Method | Route | Auth Header | Description |
-|---|---|---|---|
-| `GET` | `/api/stats` | Public | Dashboard metrics (unique count, tracks, FPS, class counts) |
-| `GET` | `/api/events` | Public | List of waste detections (last 200, newest first) |
-| `POST` | `/api/feed/clear` | `X-Operator-Token` | Clears detections from MongoDB (E3) |
-| `GET` | `/api/chart_data` | Public | Class aggregations for bar and doughnut charts |
-| `GET` | `/api/telemetry` | Public | Active drone telemetry and fleet status |
-| `POST` | `/api/drone/select` | `X-Operator-Token` | Sets active drone |
-| `POST` | `/api/drone/command` | `X-Operator-Token` | Sends flight command (`start`, `hold`, `rth`, `land`) (E1) |
-| `POST` | `/api/camera/command` | `X-Operator-Token` | Controls camera (`photo`, `record`, `zoom`, `track`) (E1) |
-| `GET` | `/api/export/csv` | `X-Operator-Token` | Downloads all stored detections as CSV (E3) |
-| `GET` | `/api/export/json` | `X-Operator-Token` | Downloads all stored detections as JSON (E3) |
-| `POST` | `/api/drone/connect` | `X-Operator-Token` | Connects or registers a drone with target allowlist validation |
-| `POST` | `/api/drone/telemetry` | `X-Drone-Token` | Ingests live telemetry with coordinate & battery validation (E2) |
-| `POST` | `/api/drone/detection` | `X-Drone-Token` | Ingests waste detection event (E2) |
-| `POST` | `/api/drone/stream-frame` | `X-Drone-Token` | Ingests live camera frame (E2) |
-| `GET` | `/video_feed` | `X-Operator-Token` | Live MJPEG camera feed (gated by operator authentication) |
+Continuous integration executes automatically on push and pull requests via `.github/workflows/ci.yml`.

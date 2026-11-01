@@ -1594,3 +1594,19 @@ def test_e13_governance_env_example_license_and_ci_workflow():
         ci_content = f.read()
     assert "npm test" in ci_content
     assert "pytest test_drone_security.py" in ci_content
+
+
+def test_e12_readme_run_paths_and_proxy_architecture():
+    """
+    E12 / OP-SHARED-LOCKOUT: Verifies that README.md documents consistent run paths
+    routing through Nginx port 8080, local dev run paths, and shared NAT lockout handling.
+    """
+    readme_path = os.path.join(ECOWING_DIR, "README.md")
+    assert os.path.isfile(readme_path), "EcoWing README.md must exist"
+    with open(readme_path, "r", encoding="utf-8") as f:
+        text = f.read()
+
+    assert "http://localhost:8080" in text, "README must document Nginx port 8080 gateway"
+    assert "Docker Compose Run Path" in text, "README must document Docker Compose run path"
+    assert "Local Development Run Path" in text, "README must document Local Development run path"
+    assert "OP-SHARED-LOCKOUT" in text, "README must document shared NAT pairing and lockout handling"
