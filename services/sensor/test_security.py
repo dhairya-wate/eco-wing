@@ -287,23 +287,46 @@ def test_mobile_ws_auth_error_handling_cases():
             ws.receive_text()
     assert exc_bad_sess.value.code == 1008
 
-def test_trusted_proxies_resolution_docker_and_untrusted():
+def test_trusted_proxies_resolution_docker_and_untrusted(monkeypatch):
     """
-    Verifies that X-Forwarded-For is accepted ONLY from exact TRUSTED_PROXIES gateway IPs (e.g. 172.17.0.1).
-    Other subnet addresses (e.g. 172.17.0.5) and untrusted socket IPs (e.g. 192.168.1.100) ignore X-Forwarded-For.
+    Verifies that:
+    1. Default TRUSTED_PROXIES is empty, so proxy-forwarded IPs (X-Forwarded-For) are ignored
+       and the direct socket peer is always used.
+    2. When an exact IP is configured in TRUSTED_PROXIES, X-Forwarded-For is accepted ONLY from
+       that exact peer, and ignored for other subnet addresses and untrusted peers.
     """
     from starlette.requests import Request
+    import app as app_module
 
-    # Case A: Peer is exact Docker bridge gateway (172.17.0.1 in TRUSTED_PROXIES) -> trust X-Forwarded-For
-    scope_docker = {
+    # Part 1: Default state (TRUSTED_PROXIES is empty) -> X-Forwarded-For is ignored everywhere
+    monkeypatch.setattr(app_module, "TRUSTED_PROXIES", set())
+
+    # Peer is Docker gateway IP -> ignored because list is empty
+    scope_default_docker = {
         "type": "http",
         "client": ("172.17.0.1", 54321),
         "headers": [(b"x-forwarded-for", b"203.0.113.195, 10.0.0.1")]
     }
-    req_docker = Request(scope_docker)
-    assert get_client_ip(req_docker) == "203.0.113.195"
+    req_default_docker = Request(scope_default_docker)
+    assert get_client_ip(req_default_docker) == "172.17.0.1"
 
-    # Case B: Peer is another container in the Docker subnet (172.17.0.5) -> must NOT be trusted (no subnets)
+    # Peer is localhost -> ignored because list is empty
+    scope_default_local = {
+        "type": "http",
+        "client": ("127.0.0.1", 54321),
+        "headers": [(b"x-forwarded-for", b"203.0.113.195")]
+    }
+    req_default_local = Request(scope_default_local)
+    assert get_client_ip(req_default_local) == "127.0.0.1"
+
+    # Part 2: Explicitly configured TRUSTED_PROXIES with exact gateway IP
+    monkeypatch.setattr(app_module, "TRUSTED_PROXIES", {"172.17.0.1"})
+
+    # Exact match -> trust X-Forwarded-For
+    req_trusted = Request(scope_default_docker)
+    assert get_client_ip(req_trusted) == "203.0.113.195"
+
+    # Other container in subnet (172.17.0.5) -> not in TRUSTED_PROXIES (no subnets) -> socket IP
     scope_subnet = {
         "type": "http",
         "client": ("172.17.0.5", 54321),
@@ -312,7 +335,7 @@ def test_trusted_proxies_resolution_docker_and_untrusted():
     req_subnet = Request(scope_subnet)
     assert get_client_ip(req_subnet) == "172.17.0.5"
 
-    # Case C: Peer is untrusted LAN IP (192.168.1.100) -> use socket IP
+    # Untrusted LAN IP (192.168.1.100) -> use socket IP
     scope_untrusted = {
         "type": "http",
         "client": ("192.168.1.100", 54321),

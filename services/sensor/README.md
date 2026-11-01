@@ -87,10 +87,17 @@ When the server is running on your machine:
    - Close frame reason phrases are strictly limited to fixed strings <= 123 bytes per RFC 6455. Server exceptions are logged server-side only with generic reason `"Internal server error: Frame ingestion failed"` sent to the client (code 1011).
 
 4. **Network Topology & Trusted Proxies:**
-   - `TRUSTED_PROXIES` defaults to `"127.0.0.1,::1,172.17.0.1,192.168.65.2"`.
-   - Security topology rule: Trust ONLY the exact gateway IP, never whole subnets or DNS names (to prevent DNS spoofing and cross-container IP spoofing).
-   - For Docker-to-host deployments (where EcoWing runs in Docker and Detection runs on the host), requests proxied through EcoWing's Nginx container reach Detection via the Docker bridge gateway address (`172.17.0.1` on Linux, or `192.168.65.2` on Docker Desktop).
-   - `X-Forwarded-For` is honored only when requests originate directly from an exact IP in `TRUSTED_PROXIES`. Untrusted peer requests ignore `X-Forwarded-For` and use the direct peer socket IP.
+   - `DETECTION_TRUSTED_PROXIES` defaults to `""` (empty list; direct socket peer is always used).
+   - **Proxy-forwarded IPs (X-Forwarded-For) are unsupported until verified.** When `DETECTION_TRUSTED_PROXIES` is empty, incoming `X-Forwarded-For` headers are strictly ignored and client IP is resolved from the socket peer directly.
+   - **Nginx-to-Detection Path Status:** **UNVERIFIED** (Docker is unavailable on test environment).
+   - If deploying with Docker Compose on a supported Docker host, manual verification can be performed using `wget` inside the container (using `wget`, not `curl`, as Alpine Nginx includes `wget`):
+     ```bash
+     docker compose exec web wget -qO- \
+       --header="X-Operator-Token: $DETECTION_OPERATOR_TOKEN" \
+       http://host.docker.internal:5000/api/system_info
+     ```
+   - Security topology rule: Trust ONLY the exact gateway IP when configuring `DETECTION_TRUSTED_PROXIES`, never whole subnets or DNS names (to prevent DNS spoofing and cross-container IP spoofing).
+   - `X-Forwarded-For` is honored only when requests originate directly from an exact IP configured in `DETECTION_TRUSTED_PROXIES`. Untrusted peer requests ignore `X-Forwarded-For` and use the direct peer socket IP.
 
 5. **Security Error Responses Contract (`app.py` Source of Truth):**
    - **HTTP 401 Unauthorized:**
@@ -110,6 +117,7 @@ When the server is running on your machine:
      ```bash
      uvicorn app:app --host 127.0.0.1 --port 5000 --ws-max-size 5242880
      ```
+   - The `--ws-max-size 5242880` argument sets the enforced transport frame limit at the ASGI layer.
 
 7. **Development Internet Tunnel (`start_tunnel.bat`):**
    - `start_tunnel.bat` is strictly for **development and testing**.

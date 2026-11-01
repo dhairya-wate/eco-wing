@@ -43,12 +43,10 @@ if is_repeated_pattern or len(set(OPERATOR_TOKEN)) < 12:
 
 # Trusted Proxies Topology:
 # Exact IP addresses allowed to provide client IP via X-Forwarded-For.
-# Per security architecture: Trust ONLY the exact gateway IP, never whole subnets or DNS names.
-# Default trusted gateway addresses:
-# - Loopback: 127.0.0.1, ::1
-# - Linux Docker bridge gateway: 172.17.0.1
-# - Docker Desktop bridge IP: 192.168.65.2
-_raw_proxies = os.getenv("TRUSTED_PROXIES", "127.0.0.1,::1,172.17.0.1,192.168.65.2")
+# Default is an empty set/list, so proxy-forwarded IPs are unsupported until verified
+# and the direct socket peer is always used.
+# Consistent env lookup: checks DETECTION_TRUSTED_PROXIES first, then TRUSTED_PROXIES.
+_raw_proxies = os.getenv("DETECTION_TRUSTED_PROXIES", os.getenv("TRUSTED_PROXIES", ""))
 TRUSTED_PROXIES = {p.strip().lower() for p in _raw_proxies.split(",") if p.strip()}
 
 # Network Configuration: Localhost binding by default, explicit LAN opt-in via ALLOW_LAN=true
