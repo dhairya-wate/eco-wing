@@ -410,6 +410,8 @@ def test_fixture_dimensions_parsed_from_all_seven_real_files():
     and WebP VP8X (extended) all parse to exact dimensions (128x96) using real files.
     """
     fixtures_dir = Path(__file__).resolve().parent / "test_samples" / "fixtures"
+    if not fixtures_dir.exists():
+        fixtures_dir = Path(__file__).resolve().parents[2] / "test_samples" / "fixtures"
     fixture_files = [
         "sample.png",
         "sample.jpg",

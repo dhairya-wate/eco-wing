@@ -1,3 +1,4 @@
+import json
 import os
 import sys
 from pathlib import Path
@@ -14,10 +15,9 @@ def test_contract_schema_and_taxonomy_validation():
     - A payload with an unknown class_id fails schema validation.
     """
     candidates = [
-        Path(__file__).resolve().parent.parent.parent / "contracts",
-        Path(__file__).resolve().parent.parent / "contracts",
+        Path(__file__).resolve().parents[2] / "contracts",
         Path(__file__).resolve().parents[3] / "contracts",
-        Path(r"c:\Users\Anshu\Desktop\mini-project\contracts"),
+        Path(__file__).resolve().parent.parent / "contracts",
     ]
     contracts_dir = None
     for cand in candidates:
@@ -27,65 +27,67 @@ def test_contract_schema_and_taxonomy_validation():
 
     assert contracts_dir is not None, f"Could not find contracts directory among candidates: {candidates}"
     taxonomy_file = contracts_dir / "taxonomy.yaml"
-    detection_schema_file = contracts_dir / "detection-event.schema.json"
+    schema_file = contracts_dir / "detection-event.schema.json"
 
-    assert taxonomy_file.exists(), f"taxonomy.yaml not found at {taxonomy_file}"
-    assert detection_schema_file.exists(), f"detection-event.schema.json not found at {detection_schema_file}"
+    assert taxonomy_file.exists(), f"Taxonomy file {taxonomy_file} does not exist"
+    assert schema_file.exists(), f"Schema file {schema_file} does not exist"
 
-    # 1. Parse and validate taxonomy.yaml structure
     with open(taxonomy_file, "r", encoding="utf-8") as f:
         tax = yaml.safe_load(f)
 
-    assert "taxonomy_version" in tax
-    assert "classification_method" in tax
-    assert "classes" in tax
-    assert isinstance(tax["classes"], dict)
-    assert len(tax["classes"]) > 0
+    with open(schema_file, "r", encoding="utf-8") as f:
+        det_schema = json.load(f)
 
-    valid_enums = {"yes", "no", "estimated", "depends", "unknown"}
-    for class_id, meta in tax["classes"].items():
-        assert class_id.islower() and " " not in class_id, f"Class ID '{class_id}' must be snake_case"
-        assert "display_name" in meta
-        assert "coco_label" in meta
-        assert "category" in meta
-        assert "material" in meta
-        assert meta.get("recyclable") in valid_enums, f"Invalid recyclable enum for {class_id}"
-        assert meta.get("biodegradable") in valid_enums, f"Invalid biodegradable enum for {class_id}"
+    # 1. Validate taxonomy classes
+    allowed_materials = set(tax["allowed_property_values"]["material"])
+    allowed_rec = set(tax["allowed_property_values"]["recyclable"])
+    allowed_bio = set(tax["allowed_property_values"]["biodegradable"])
 
-    # 2. Parse and validate detection-event.schema.json
-    import json
-    with open(detection_schema_file, "r", encoding="utf-8") as f:
-        detection_schema = json.load(f)
+    assert tax["taxonomy_version"] == "1.0.0"
+    assert tax["classification_method"] == "coco_mapping"
+    assert len(tax["classes"]) == 18
 
+    for cid, cinfo in tax["classes"].items():
+        assert cid == cinfo["class_id"]
+        assert cid.islower() and " " not in cid
+        assert cinfo["material"] in allowed_materials
+        assert cinfo["recyclable"] in allowed_rec
+        assert cinfo["biodegradable"] in allowed_bio
+
+    # 2. Check draft-07 schema validity
+    jsonschema.Draft7Validator.check_schema(det_schema)
+
+    # 3. Create valid fixture representing detector output
     valid_event = {
-        "event_id": "a0000000-0000-4000-8000-000000000001",
-        "device_id": "sensor-test-unit",
-        "timestamp": 1730000000.123,
-        "timestamp_iso": "2024-10-27T03:33:20.123456Z",
-        "class_id": "plastic_bottle",
-        "display_name": "Plastic Bottle",
-        "category": "plastic",
-        "material": "unknown",
-        "confidence": 0.88,
-        "bbox": [10.0, 20.0, 100.0, 200.0],
-        "recyclable": "yes",
-        "biodegradable": "no",
+        "event_id": "12345678-1234-4234-8234-123456789abc",
+        "drone_id": "Drone-01",
         "source": "camera",
+        "observed_at": "2026-11-01T09:20:00Z",
+        "taxonomy_version": "1.0.0",
         "classification_method": "coco_mapping",
-        "taxonomy_version": "1.0.0"
+        "items": [
+            {
+                "class_id": "bottle",
+                "coco_label": "bottle",
+                "confidence": 0.85,
+                "bbox": [10.0, 15.0, 120.0, 240.0],
+                "category": "Container",
+                "material": "unknown",
+                "recyclable": "depends",
+                "biodegradable": "no"
+            }
+        ]
     }
+    jsonschema.validate(instance=valid_event, schema=det_schema)
 
-    # Should succeed without error
-    jsonschema.validate(instance=valid_event, schema=detection_schema)
-
-    # 3. Payload with confidence 50 (percentage) MUST fail schema validation
-    invalid_conf_event = valid_event.copy()
-    invalid_conf_event["confidence"] = 50
+    # 4. Payload with confidence 50 must fail schema validation
+    bad_conf = dict(valid_event)
+    bad_conf["items"] = [dict(valid_event["items"][0], confidence=50)]
     with pytest.raises(jsonschema.ValidationError):
-        jsonschema.validate(instance=invalid_conf_event, schema=detection_schema)
+        jsonschema.validate(instance=bad_conf, schema=det_schema)
 
-    # 4. Payload with unknown class_id MUST fail schema validation
-    invalid_class_event = valid_event.copy()
-    invalid_class_event["class_id"] = "radioactive_uranium_core"
+    # 5. Payload with unknown class_id must fail schema validation
+    bad_class = dict(valid_event)
+    bad_class["items"] = [dict(valid_event["items"][0], class_id="plastic_bag_unknown")]
     with pytest.raises(jsonschema.ValidationError):
-        jsonschema.validate(instance=invalid_class_event, schema=detection_schema)
+        jsonschema.validate(instance=bad_class, schema=det_schema)

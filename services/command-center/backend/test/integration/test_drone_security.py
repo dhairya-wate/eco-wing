@@ -4,7 +4,7 @@ import re
 import subprocess
 import pytest
 
-ECOWING_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+ECOWING_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 def run_node_eval(code: str, env: dict = None) -> dict:
     """Executes Node snippet and parses JSON output."""
@@ -974,9 +974,9 @@ def test_contract_schemas_and_command_state_machine_validation():
     import jsonschema
     from pathlib import Path
 
-    contracts_dir = Path(__file__).resolve().parent / "contracts"
+    contracts_dir = Path(ECOWING_DIR) / "contracts"
     if not contracts_dir.exists():
-        contracts_dir = Path(__file__).resolve().parent.parent / "contracts"
+        contracts_dir = Path(ECOWING_DIR).parent.parent / "contracts"
 
     det_schema_path = contracts_dir / "detection-event.schema.json"
     cmd_schema_path = contracts_dir / "command.schema.json"
