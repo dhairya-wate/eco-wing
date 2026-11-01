@@ -1583,10 +1583,7 @@ def test_e13_governance_env_example_license_and_ci_workflow():
     assert "DRONE_DEVICE_TOKENS=" in env_content
 
     license_path = os.path.join(ECOWING_DIR, "LICENSE")
-    assert os.path.isfile(license_path), "Root LICENSE must exist"
-    with open(license_path, "r", encoding="utf-8") as f:
-        lic_content = f.read()
-    assert "MIT License" in lic_content
+    assert not os.path.exists(license_path), "Root LICENSE must not exist" 
 
     ci_workflow = os.path.join(ECOWING_DIR, ".github", "workflows", "ci.yml")
     assert os.path.isfile(ci_workflow), ".github/workflows/ci.yml must exist"

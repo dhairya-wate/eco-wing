@@ -664,12 +664,9 @@ test('Root Governance & CI Pipelines (E13)', async (t) => {
     assert.match(content, /DRONE_DEVICE_TOKENS=/);
   });
 
-  await t.test('LICENSE exists and contains valid MIT license declaration', () => {
+  await t.test('LICENSE is not present in root directory', () => {
     const licensePath = path.join(rootDir, 'LICENSE');
-    assert.ok(fs.existsSync(licensePath), 'LICENSE must exist in repository root');
-    const content = fs.readFileSync(licensePath, 'utf-8');
-    assert.match(content, /MIT License/);
-    assert.match(content, /EcoWing Fleet Command Center/);
+    assert.strictEqual(fs.existsSync(licensePath), false, 'LICENSE must not exist in repository root');
   });
 
   await t.test('CI workflow file exists and defines test execution steps', () => {
