@@ -316,6 +316,7 @@ def get_detections():
     stale = age > DETECTION_STALE_AFTER_SECONDS
     return JSONResponse(content={
         "status": "success",
+        "scope": "live_frame",
         "timestamp": last_update,
         "timestamp_iso": datetime.datetime.fromtimestamp(last_update, tz=datetime.timezone.utc).isoformat(),
         "age_seconds": age,

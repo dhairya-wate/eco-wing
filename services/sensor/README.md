@@ -65,6 +65,7 @@ When the server is running on your machine:
 >    - **Migration Notes:** Update boolean checks from `if (item.recyclable)` to `['yes', 'estimated'].includes(item.recyclable)`.
 >
 > 3. **Additive & Restored Fields (`/api/detections`):**
+>    - `scope`: `"live_frame"`. Explicitly indicates that counts represent the instantaneous active video frame window only and are NOT cumulative mission totals (cumulative fleet statistics are maintained separately in EcoWing Command Center).
 >    - `timestamp`: Unix float epoch timestamp (e.g. `1793215978.123456`). Preserves original float type.
 >    - `timestamp_iso`: ISO 8601 UTC string (e.g. `2026-11-01T07:35:12.345678+00:00`).
 >    - `age_seconds`: Float indicating elapsed seconds since the latest inference update.

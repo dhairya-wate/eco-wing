@@ -275,6 +275,7 @@ def test_staleness_flag_lifecycle_and_worker_running():
         body = res_active.json()
 
         # Type checks
+        assert body.get("scope") == "live_frame"
         assert "timestamp" in body
         assert isinstance(body["timestamp"], float), f"Expected float timestamp, got {type(body['timestamp'])}"
         assert "timestamp_iso" in body
