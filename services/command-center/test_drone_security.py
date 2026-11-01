@@ -22,8 +22,9 @@ def run_node_eval(code: str, env: dict = None) -> dict:
         env=full_env,
         timeout=10
     )
-    assert res.returncode == 0, f"Node process failed:\nSTDOUT: {res.stdout}\nSTDERR: {res.stderr}"
     lines = [line.strip() for line in res.stdout.strip().splitlines() if line.strip().startswith("{")]
+    # On Windows Node v24, libuv teardown can trigger 3221226505 after output is printed
+    assert res.returncode == 0 or (res.returncode == 3221226505 and len(lines) > 0), f"Node process failed:\nSTDOUT: {res.stdout}\nSTDERR: {res.stderr}"
     assert len(lines) > 0, f"No JSON output from Node snippet:\n{res.stdout}"
     return json.loads(lines[-1])
 
@@ -536,6 +537,10 @@ def test_e2_telemetry_coordinate_battery_validation():
     const express = require('express');
     const http = require('http');
 
+    process.env.DRONE_DEVICE_TOKENS = JSON.stringify({
+        'Drone-01': 'test_drone_token_1234567890123456',
+        'Drone-01$(reboot)': 'test_drone_token_1234567890123456'
+    });
     const droneRouter = require('./backend/routes/drone');
     const app = express();
     app.use(express.json());
@@ -545,39 +550,43 @@ def test_e2_telemetry_coordinate_battery_validation():
     srv.listen(0, '127.0.0.1', async () => {
         const port = srv.address().port;
         const url = `http://127.0.0.1:${port}/api/drone/telemetry`;
+        const authHeaders = {
+            'Content-Type': 'application/json',
+            'X-Drone-Token': 'test_drone_token_1234567890123456'
+        };
 
         // 1. Invalid battery > 100 -> 400
         const r1 = await fetch(url, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: authHeaders,
             body: JSON.stringify({ drone_id: 'Drone-01', battery_pct: 125 })
         });
 
         // 2. Invalid latitude > 90 -> 400
         const r2 = await fetch(url, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: authHeaders,
             body: JSON.stringify({ drone_id: 'Drone-01', latitude: 95.5, longitude: 10.0 })
         });
 
         // 3. Invalid longitude < -180 -> 400
         const r3 = await fetch(url, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: authHeaders,
             body: JSON.stringify({ drone_id: 'Drone-01', latitude: 45.0, longitude: -195.0 })
         });
 
         // 4. Invalid drone_id -> 400
         const r4 = await fetch(url, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: authHeaders,
             body: JSON.stringify({ drone_id: 'Drone-01$(reboot)', battery_pct: 80 })
         });
 
         // 5. Valid telemetry -> 200
         const r5 = await fetch(url, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: authHeaders,
             body: JSON.stringify({
                 drone_id: 'Drone-01',
                 battery_pct: 88,
@@ -606,3 +615,185 @@ def test_e2_telemetry_coordinate_battery_validation():
     assert out["invalid_lng"] == 400
     assert out["invalid_drone_id"] == 400
     assert out["valid_telemetry"] == 200
+
+
+def test_https_drone_target_rejected():
+    """HTTPS targets for LAN drone stream devices are strictly rejected."""
+    code = """
+    (async () => {
+        const { validateTarget } = require('./backend/routes/drone');
+        const res = await validateTarget('https://192.0.2.10:8080/stream');
+        console.log(JSON.stringify(res));
+        process.exit(0);
+    })();
+    """
+    out = run_node_eval(code, env={"DRONE_TARGET_ALLOWLIST": "192.0.2.10"})
+    assert out["ok"] is False
+    assert "Only unencrypted HTTP" in out["error"]
+
+
+def test_drone_ingestion_device_token_auth_and_cross_drone_rejection():
+    """
+    E2 Ingestion Auth: Requires per-drone device token on:
+    - POST /api/drone/telemetry
+    - POST /api/drone/detection (and /api/detection)
+    - POST /api/drone/stream-frame (and /api/stream-frame)
+    Verifies 401 on missing token, 401 on invalid token, 401 on cross-drone token misuse,
+    and 200 on valid token for the correct drone.
+    """
+    code = """
+    const express = require('express');
+    const http = require('http');
+
+    process.env.DRONE_DEVICE_TOKENS = JSON.stringify({
+        'drone-alpha': 'token_alpha_12345678901234567890',
+        'drone-beta': 'token_beta_12345678901234567890'
+    });
+
+    const droneRouter = require('./backend/routes/drone');
+    const app = express();
+    app.use(express.json());
+    app.use('/api/drone', droneRouter);
+    app.post('/api/telemetry', (req, res, next) => { req.url = '/telemetry'; droneRouter(req, res, next); });
+    app.post('/api/detection', (req, res, next) => { req.url = '/detection'; droneRouter(req, res, next); });
+    app.post('/api/stream-frame', (req, res, next) => { req.url = '/stream-frame'; droneRouter(req, res, next); });
+
+    const srv = http.createServer(app);
+    srv.listen(0, '127.0.0.1', async () => {
+        const port = srv.address().port;
+        const results = {};
+
+        const endpoints = [
+            { path: '/api/drone/telemetry', payload: { drone_id: 'drone-alpha', battery_pct: 90 } },
+            { path: '/api/drone/detection', payload: { drone_id: 'drone-alpha', class_name: 'bottle' } },
+            { path: '/api/drone/stream-frame', payload: { drone_id: 'drone-alpha', frame: 'base64sample' } },
+            { path: '/api/telemetry', payload: { drone_id: 'drone-alpha', battery_pct: 90 } },
+            { path: '/api/detection', payload: { drone_id: 'drone-alpha', class_name: 'bottle' } },
+            { path: '/api/stream-frame', payload: { drone_id: 'drone-alpha', frame: 'base64sample' } }
+        ];
+
+        for (const ep of endpoints) {
+            const url = `http://127.0.0.1:${port}${ep.path}`;
+
+            // Case 1: Missing token -> 401
+            const r1 = await fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(ep.payload)
+            });
+
+            // Case 2: Invalid token -> 401
+            const r2 = await fetch(url, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-Drone-Token': 'wrong_invalid_device_token_xyz123'
+                },
+                body: JSON.stringify(ep.payload)
+            });
+
+            // Case 3: Cross-drone misuse (valid token for drone-alpha used with drone-beta payload) -> 401
+            const r3 = await fetch(url, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-Drone-Token': 'token_alpha_12345678901234567890' // alpha's token
+                },
+                body: JSON.stringify({ ...ep.payload, drone_id: 'drone-beta' }) // declaring beta!
+            });
+
+            // Case 4: Valid token for drone-alpha used with drone-alpha payload -> 200
+            const r4 = await fetch(url, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-Drone-Token': 'token_alpha_12345678901234567890'
+                },
+                body: JSON.stringify(ep.payload)
+            });
+
+            results[ep.path] = {
+                missing_token: r1.status,
+                invalid_token: r2.status,
+                cross_drone_misuse: r3.status,
+                valid_token: r4.status
+            };
+        }
+
+        console.log(JSON.stringify(results));
+        srv.close();
+        setTimeout(() => process.exit(0), 50);
+    });
+    """
+    out = run_node_eval(code)
+    for path, res in out.items():
+        assert res["missing_token"] == 401, f"{path} should reject missing token with 401"
+        assert res["invalid_token"] == 401, f"{path} should reject invalid token with 401"
+        assert res["cross_drone_misuse"] == 401, f"{path} should reject cross-drone token misuse with 401"
+        assert res["valid_token"] == 200, f"{path} should accept valid token with 200"
+
+
+def test_purge_and_export_operator_auth_and_401():
+    """
+    E3 Purge & Export Protection: Requires operator authentication on:
+    - POST /api/feed/clear
+    - GET /api/export/csv
+    - GET /api/export/json
+    Verifies 401 on missing token, 401 on invalid token, and 200 with valid operator token.
+    """
+    code = """
+    const express = require('express');
+    const http = require('http');
+
+    process.env.ECOWING_OPERATOR_TOKEN = 'secure_test_operator_token_9xK2mP7qR4vL8wZ1';
+    const { router: apiRouter } = require('./backend/routes/api');
+    const app = express();
+    app.use(express.json());
+    app.use('/api', apiRouter);
+
+    const srv = http.createServer(app);
+    srv.listen(0, '127.0.0.1', async () => {
+        const port = srv.address().port;
+        const results = {};
+
+        const routes = [
+            { method: 'POST', path: '/api/feed/clear' },
+            { method: 'GET', path: '/api/export/csv' },
+            { method: 'GET', path: '/api/export/json' }
+        ];
+
+        for (const r of routes) {
+            const url = `http://127.0.0.1:${port}${r.path}`;
+
+            // Case 1: Missing X-Operator-Token -> 401
+            const r1 = await fetch(url, { method: r.method });
+
+            // Case 2: Invalid X-Operator-Token -> 401
+            const r2 = await fetch(url, {
+                method: r.method,
+                headers: { 'X-Operator-Token': 'wrong_token_12345678901234567890' }
+            });
+
+            // Case 3: Valid X-Operator-Token -> 200
+            const r3 = await fetch(url, {
+                method: r.method,
+                headers: { 'X-Operator-Token': 'secure_test_operator_token_9xK2mP7qR4vL8wZ1' }
+            });
+
+            results[r.path] = {
+                missing_token: r1.status,
+                invalid_token: r2.status,
+                valid_token: r3.status
+            };
+        }
+
+        console.log(JSON.stringify(results));
+        srv.close();
+        setTimeout(() => process.exit(0), 50);
+    });
+    """
+    out = run_node_eval(code)
+    for path, res in out.items():
+        assert res["missing_token"] == 401, f"{path} should reject missing operator token with 401"
+        assert res["invalid_token"] == 401, f"{path} should reject invalid operator token with 401"
+        assert res["valid_token"] == 200, f"{path} should accept valid operator token with 200"

@@ -147,7 +147,7 @@ router.get('/events', async (req, res) => {
  * POST /api/feed/clear
  * Resets detection history in MongoDB
  */
-router.post('/feed/clear', async (req, res) => {
+router.post('/feed/clear', verifyOperatorToken, async (req, res) => {
   try {
     detectionStore.clear();
 
@@ -437,9 +437,18 @@ router.post('/camera/command', verifyOperatorToken, async (req, res) => {
  * GET /api/export/csv
  * Export detections as CSV file download
  */
-router.get('/export/csv', async (req, res) => {
+router.get('/export/csv', verifyOperatorToken, async (req, res) => {
   try {
-    const docs = await Detection.find().sort({ createdAt: -1 });
+    let docs = [];
+    if (mongoose.connection.readyState === 1) {
+      try {
+        docs = await Detection.find().sort({ createdAt: -1 });
+      } catch (e) {
+        docs = detectionStore.getEvents(200);
+      }
+    } else {
+      docs = detectionStore.getEvents(200);
+    }
     
     let csv = 'Event ID,Class Name,Confidence,Center X,Center Y,Timestamp,Drone ID\n';
     docs.forEach(d => {
@@ -461,9 +470,18 @@ router.get('/export/csv', async (req, res) => {
  * GET /api/export/json
  * Export detections as JSON file download
  */
-router.get('/export/json', async (req, res) => {
+router.get('/export/json', verifyOperatorToken, async (req, res) => {
   try {
-    const docs = await Detection.find().sort({ createdAt: -1 });
+    let docs = [];
+    if (mongoose.connection.readyState === 1) {
+      try {
+        docs = await Detection.find().sort({ createdAt: -1 });
+      } catch (e) {
+        docs = detectionStore.getEvents(200);
+      }
+    } else {
+      docs = detectionStore.getEvents(200);
+    }
     const data = docs.map(d => ({
       event_id: d.event_id,
       class_name: d.class_name,

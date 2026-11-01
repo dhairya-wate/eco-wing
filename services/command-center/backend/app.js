@@ -85,6 +85,9 @@ app.get('/video_feed', handleClient);
 
 // Mount API routes
 app.use('/api/drone', droneRouter);
+app.post('/api/telemetry', (req, res, next) => { req.url = '/telemetry'; droneRouter(req, res, next); });
+app.post('/api/detection', (req, res, next) => { req.url = '/detection'; droneRouter(req, res, next); });
+app.post('/api/stream-frame', (req, res, next) => { req.url = '/stream-frame'; droneRouter(req, res, next); });
 app.use('/api', apiRouter);
 
 // Serve static frontend files (index.html, config.js, etc.)

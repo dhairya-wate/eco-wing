@@ -31,6 +31,13 @@ function validateOperatorTokenConfig(token) {
 // Enforce token validation on module startup
 validateOperatorTokenConfig(ECOWING_OPERATOR_TOKEN);
 
+function constantTimeCompare(a, b) {
+  if (typeof a !== 'string' || typeof b !== 'string') return false;
+  const hashA = crypto.createHash('sha256').update(a).digest();
+  const hashB = crypto.createHash('sha256').update(b).digest();
+  return crypto.timingSafeEqual(hashA, hashB);
+}
+
 function verifyOperatorToken(req, res, next) {
   const token = req.headers['x-operator-token'];
   if (!ECOWING_OPERATOR_TOKEN || !token) {
@@ -38,9 +45,7 @@ function verifyOperatorToken(req, res, next) {
       error: "Unauthorized: invalid or missing operator token. Provide 'X-Operator-Token' header."
     });
   }
-  const tokenBuf = Buffer.from(String(token).trim());
-  const secretBuf = Buffer.from(ECOWING_OPERATOR_TOKEN);
-  if (tokenBuf.length !== secretBuf.length || !crypto.timingSafeEqual(tokenBuf, secretBuf)) {
+  if (!constantTimeCompare(String(token).trim(), ECOWING_OPERATOR_TOKEN)) {
     return res.status(401).json({
       error: "Unauthorized: invalid or missing operator token. Provide 'X-Operator-Token' header."
     });
@@ -48,8 +53,93 @@ function verifyOperatorToken(req, res, next) {
   next();
 }
 
+/**
+ * Resolves the expected device token for a specific drone ID from environment variables only.
+ * Checks DRONE_TOKEN_<DRONE_ID> and DRONE_DEVICE_TOKENS (JSON or 'id:token,id2:token2').
+ */
+function getExpectedDroneToken(droneId) {
+  if (!droneId || typeof droneId !== 'string') return null;
+  const cleanId = droneId.trim();
+
+  // 1. Direct environment variable: DRONE_TOKEN_<DRONE_ID>
+  const envKey = `DRONE_TOKEN_${cleanId.toUpperCase().replace(/[^A-Z0-9]/g, '_')}`;
+  if (process.env[envKey] && process.env[envKey].trim()) {
+    return process.env[envKey].trim();
+  }
+
+  // 2. Mapping from DRONE_DEVICE_TOKENS environment variable
+  const rawTokens = process.env.DRONE_DEVICE_TOKENS || '';
+  if (rawTokens.trim()) {
+    const trimmed = rawTokens.trim();
+    if (trimmed.startsWith('{')) {
+      try {
+        const parsed = JSON.parse(trimmed);
+        if (parsed[cleanId]) return String(parsed[cleanId]).trim();
+      } catch (e) {}
+    } else {
+      for (const pair of trimmed.split(',')) {
+        const [dId, dToken] = pair.split(':');
+        if (dId && dToken && dId.trim().toLowerCase() === cleanId.toLowerCase()) {
+          return dToken.trim();
+        }
+      }
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Middleware: Enforces per-drone device token on ingestion routes.
+ * Uses constant-time comparison and environment-variable storage only.
+ * Rejects missing or mismatched tokens, preventing Drone A from impersonating Drone B.
+ */
+function verifyDroneToken(req, res, next) {
+  const droneId = req.body?.drone_id || req.headers['x-drone-id'] || (req.query && req.query.drone_id);
+  if (!droneId || typeof droneId !== 'string') {
+    return res.status(401).json({
+      error: "Unauthorized: missing or invalid drone identifier ('drone_id')."
+    });
+  }
+
+  const authHeader = req.headers['authorization'];
+  let token = req.headers['x-drone-token'] || req.headers['x-device-token'];
+  if (!token && authHeader) {
+    if (authHeader.startsWith('Bearer ')) {
+      token = authHeader.substring(7).trim();
+    } else {
+      token = authHeader.trim();
+    }
+  }
+
+  if (!token) {
+    return res.status(401).json({
+      error: "Unauthorized: missing drone device token. Provide 'X-Drone-Token' or 'Authorization: Bearer <token>' header."
+    });
+  }
+
+  const expectedToken = getExpectedDroneToken(droneId);
+  if (!expectedToken) {
+    return res.status(401).json({
+      error: `Unauthorized: no device token configured for drone '${droneId}'.`
+    });
+  }
+
+  if (!constantTimeCompare(String(token).trim(), expectedToken)) {
+    return res.status(401).json({
+      error: `Unauthorized: invalid device token for drone '${droneId}'.`
+    });
+  }
+
+  req.authenticatedDroneId = droneId;
+  next();
+}
+
 module.exports = {
   ECOWING_OPERATOR_TOKEN,
   validateOperatorTokenConfig,
-  verifyOperatorToken
+  verifyOperatorToken,
+  verifyDroneToken,
+  constantTimeCompare,
+  getExpectedDroneToken
 };

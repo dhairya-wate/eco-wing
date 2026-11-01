@@ -19,8 +19,8 @@ let lastFrameTime = 0;
 let frameCount = 0;
 let currentFps = 0.0;
 
-// Calculate FPS periodically
-setInterval(() => {
+// Calculate FPS periodically (unref so background timer does not hold event loop open during shutdown or tests)
+const fpsInterval = setInterval(() => {
   currentFps = frameCount;
   frameCount = 0;
   // If no frame received in the last 3 seconds, reset latestFrame
@@ -29,6 +29,9 @@ setInterval(() => {
     currentFps = 0.0;
   }
 }, 1000);
+if (fpsInterval && typeof fpsInterval.unref === 'function') {
+  fpsInterval.unref();
+}
 
 /**
  * Handle new client connection to /video_feed

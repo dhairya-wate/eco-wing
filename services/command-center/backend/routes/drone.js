@@ -13,7 +13,8 @@ const detectionStore = require('../detectionStore');
 const {
   ECOWING_OPERATOR_TOKEN,
   validateOperatorTokenConfig,
-  verifyOperatorToken
+  verifyOperatorToken,
+  verifyDroneToken
 } = require('../middleware/auth');
 
 // In-memory drone state when MongoDB is offline
@@ -21,15 +22,14 @@ const memoryDrones = new Map();
 
 let nextEventId = 1;
 
-// Initialize nextEventId from highest event_id in database
-(async () => {
-  try {
-    const highest = await Detection.findOne().sort({ event_id: -1 });
+// Initialize nextEventId from highest event_id in database (only when connected)
+if (mongoose.connection.readyState === 1) {
+  Detection.findOne().sort({ event_id: -1 }).then(highest => {
     if (highest && highest.event_id) {
       nextEventId = highest.event_id + 1;
     }
-  } catch (e) {}
-})();
+  }).catch(() => {});
+}
 
 // Target address allowlist for drone connections (default: empty)
 const DRONE_TARGET_ALLOWLIST = (process.env.DRONE_TARGET_ALLOWLIST || '')
@@ -93,8 +93,8 @@ async function validateTarget(target, { resolver } = {}) {
     } catch (e) {
       return { ok: false, error: 'Malformed URL.' };
     }
-    if (urlObj.protocol !== 'http:' && urlObj.protocol !== 'https:') {
-      return { ok: false, error: 'Invalid URL protocol (must be http:// or https://).' };
+    if (urlObj.protocol !== 'http:') {
+      return { ok: false, error: 'Only unencrypted HTTP (http://) targets are permitted for LAN drone stream devices.' };
     }
     if (urlObj.username || urlObj.password) {
       return { ok: false, error: 'User-info in URL is prohibited (potential SSRF spoofing).' };
@@ -342,7 +342,7 @@ router.post('/disconnect', async (req, res) => {
  * POST /api/drone/telemetry
  * Ingest live telemetry from the connected drone and store in MongoDB
  */
-router.post('/telemetry', async (req, res) => {
+router.post('/telemetry', verifyDroneToken, async (req, res) => {
   try {
     const data = req.body;
     const drone_id = data.drone_id || 'Drone-01';
@@ -461,7 +461,7 @@ router.post('/telemetry', async (req, res) => {
  * POST /api/drone/detection
  * Ingest a waste detection event from the AI camera and broadcast to dashboard
  */
-router.post('/detection', async (req, res) => {
+router.post('/detection', verifyDroneToken, async (req, res) => {
   try {
     const data = req.body;
     const rawClass = data.class_name || (data.waste_type ? String(data.waste_type).toLowerCase() : 'unknown');
@@ -531,7 +531,7 @@ router.post('/detection', async (req, res) => {
  * POST /api/drone/stream-frame
  * Ingest live camera frames sent from drone companion computer or mobile broadcaster
  */
-router.post('/stream-frame', (req, res) => {
+router.post('/stream-frame', verifyDroneToken, (req, res) => {
   try {
     const { frame } = req.body;
     if (!frame) {
@@ -549,3 +549,4 @@ module.exports = router;
 module.exports.validateTarget = validateTarget;
 module.exports.validateOperatorTokenConfig = validateOperatorTokenConfig;
 module.exports.verifyOperatorToken = verifyOperatorToken;
+module.exports.verifyDroneToken = verifyDroneToken;
