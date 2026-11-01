@@ -1,0 +1,33 @@
+# Dependencies
+node_modules/
+.venv/
+venv/
+env/
+ENV/
+
+# Python caches and test artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# Databases and runtime data
+*.db
+*.sqlite
+*.sqlite3
+data/
+*.log
+
+# Build outputs
+dist/
+build/
+*.egg-info/
+scratch/
+*.bundle

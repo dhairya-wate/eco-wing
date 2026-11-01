@@ -1,0 +1,13 @@
+* text=auto eol=lf
+
+# Explicit binary files
+*.pt binary
+*.jpg binary
+*.jpeg binary
+*.png binary
+*.gif binary
+*.bmp binary
+*.webp binary
+*.db binary
+*.sqlite binary
+*.sqlite3 binary
