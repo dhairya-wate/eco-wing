@@ -21,7 +21,7 @@ from config import (
 )
 from detector import WasteDetector
 from worker import DetectionWorker
-from app import app, worker, stream_mgr
+from app import app, worker, stream_mgr, detector
 from conftest import TEST_OPERATOR_TOKEN
 
 
@@ -310,3 +310,76 @@ def test_staleness_flag_lifecycle_and_worker_running():
 
         # Resume worker for clean teardown
         worker.start()
+
+
+
+
+def test_all_confidence_values_within_zero_to_one():
+    """
+    Contract change: The detector stores and returns confidence as a float from 0.0 to 1.0.
+    The percent conversion (0-100) has been removed from the API.
+    All confidence values returned by the API and detector are strictly within [0.0, 1.0].
+    """
+    # 1. Check directly via WasteDetector
+    detector = WasteDetector()
+    blank_frame = np.zeros((480, 640, 3), dtype=np.uint8)
+    _, summary = detector.detect(blank_frame, draw_overlay=False)
+    for item in summary["items"]:
+        assert 0.0 <= item["confidence"] <= 1.0
+        assert isinstance(item["confidence"], float)
+
+    # 2. Check via /api/detections
+    with TestClient(app) as client:
+        res = client.get("/api/detections")
+        assert res.status_code == 200
+        items = res.json()["data"]["items"]
+        for item in items:
+            assert 0.0 <= item["confidence"] <= 1.0, f"API confidence {item['confidence']} outside [0.0, 1.0]"
+            assert isinstance(item["confidence"], float)
+
+    # 3. Check via /api/upload with real sample fixture
+    fixture_path = SAMPLE_DIR / "fixtures" / "sample.jpg"
+    if fixture_path.exists():
+        with TestClient(app) as client:
+            with open(fixture_path, "rb") as f:
+                res_up = client.post(
+                    "/api/upload",
+                    headers={"X-Operator-Token": TEST_OPERATOR_TOKEN},
+                    files={"file": ("sample.jpg", f.read(), "image/jpeg")}
+                )
+            assert res_up.status_code == 200
+            for item in res_up.json()["analysis"]["items"]:
+                assert 0.0 <= item["confidence"] <= 1.0, f"Upload confidence {item['confidence']} outside [0.0, 1.0]"
+                assert isinstance(item["confidence"], float)
+
+
+def test_settings_confidence_contract_accepts_unit_float_and_rejects_percentage():
+    """
+    POST /api/settings confidence contract:
+    - Accepts standard unit float in [0.0, 1.0] (e.g. 0.5 sets threshold to 0.5).
+    - Strictly rejects legacy percentage values (e.g. 50) and out-of-bounds numbers with HTTP 400.
+    """
+    with TestClient(app) as client:
+        headers = {"X-Operator-Token": TEST_OPERATOR_TOKEN}
+
+        # 1. Valid unit float 0.5 -> 200 OK
+        res_valid = client.post("/api/settings", headers=headers, json={"confidence": 0.5})
+        assert res_valid.status_code == 200
+        assert res_valid.json()["confidence"] == 0.5
+        assert detector.confidence == 0.5
+
+        # 2. Legacy percentage value 50 -> 400 Bad Request
+        res_pct = client.post("/api/settings", headers=headers, json={"confidence": 50})
+        assert res_pct.status_code == 400
+        assert "between 0.0 and 1.0" in res_pct.json()["detail"]
+
+        # 3. Negative value -> 400 Bad Request
+        res_neg = client.post("/api/settings", headers=headers, json={"confidence": -0.1})
+        assert res_neg.status_code == 400
+
+        # 4. Out of bounds > 1.0 -> 400 Bad Request
+        res_high = client.post("/api/settings", headers=headers, json={"confidence": 1.5})
+        assert res_high.status_code == 400
+
+        # Restore default confidence
+        detector.set_confidence(0.35)

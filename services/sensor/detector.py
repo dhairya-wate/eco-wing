@@ -12,6 +12,13 @@ class WasteDetector:
         print(f"[Detector] Loading YOLO model from {self.model_path}...")
         self.model = YOLO(self.model_path)
         print(f"[Detector] Model loaded successfully with {len(self.model.names)} base classes.")
+
+        # Model warmup to eliminate initial cold-start inference lag
+        try:
+            dummy_frame = np.zeros((64, 64, 3), dtype=np.uint8)
+            self.model(dummy_frame, verbose=False)
+        except Exception:
+            pass
         
     def set_confidence(self, conf: float):
         self.confidence = max(0.05, min(1.0, conf))
@@ -74,7 +81,7 @@ class WasteDetector:
                     "name": taxonomy["display_name"],
                     "category": taxonomy["category"],
                     "material": taxonomy.get("material", "unknown"),
-                    "confidence": round(conf * 100, 1),
+                    "confidence": round(float(conf), 4),
                     "recyclable": taxonomy["recyclable"],
                     "biodegradable": taxonomy["biodegradable"],
                     "classification_method": taxonomy.get("classification_method", CLASSIFICATION_METHOD),
@@ -127,7 +134,7 @@ class WasteDetector:
         cv2.line(img, (x2, y2), (x2 - corner_len, y2), color, thickness)
 
         # Header Badge: Name & Confidence
-        header_text = f"{item['name']} {item['confidence']}%"
+        header_text = f"{item['name']} {round(item['confidence'] * 100, 1)}%"
         font = cv2.FONT_HERSHEY_SIMPLEX
         font_scale = 0.5
         font_thick = 1

@@ -353,6 +353,11 @@ def get_system_info():
 def update_settings(payload: SettingsRequest):
     """Dynamically adjusts confidence threshold or video source (Operator Protected)."""
     if payload.confidence is not None:
+        if payload.confidence < 0.0 or payload.confidence > 1.0:
+            raise HTTPException(
+                status_code=400,
+                detail="Confidence threshold must be a float between 0.0 and 1.0 (got percentage or out-of-range value)."
+            )
         detector.set_confidence(payload.confidence)
     if payload.source is not None:
         stream_mgr.set_source(payload.source)
