@@ -1,0 +1,140 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "EcoWingDetectionEvent",
+  "description": "Canonical schema for waste detection events emitted by Detection sensor and ingested by EcoWing Command Center.",
+  "type": "object",
+  "required": [
+    "event_id",
+    "drone_id",
+    "source",
+    "observed_at",
+    "taxonomy_version",
+    "classification_method",
+    "items"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "event_id": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
+      "description": "Unique, stable UUIDv4 for this detection event."
+    },
+    "drone_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[a-zA-Z0-9_-]+$",
+      "description": "Identifier of the transmitting drone or sensor node."
+    },
+    "source": {
+      "type": "string",
+      "enum": ["camera", "mobile", "upload"],
+      "description": "Input frame source origin."
+    },
+    "observed_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 UTC timestamp when detection occurred."
+    },
+    "taxonomy_version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$",
+      "description": "Semantic version of the taxonomy used for classification."
+    },
+    "classification_method": {
+      "type": "string",
+      "enum": ["coco_mapping"],
+      "description": "Inference classification methodology."
+    },
+    "items": {
+      "type": "array",
+      "description": "List of waste objects classified in this event.",
+      "items": {
+        "type": "object",
+        "required": [
+          "class_id",
+          "coco_label",
+          "confidence",
+          "bbox"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "class_id": {
+            "type": "string",
+            "enum": [
+              "bottle",
+              "cup",
+              "wine_glass",
+              "fork",
+              "knife",
+              "spoon",
+              "bowl",
+              "banana",
+              "apple",
+              "sandwich",
+              "orange",
+              "broccoli",
+              "carrot",
+              "hot_dog",
+              "pizza",
+              "donut",
+              "cake",
+              "book"
+            ],
+            "description": "Canonical snake_case taxonomy identifier."
+          },
+          "coco_label": {
+            "type": "string",
+            "description": "Raw MS-COCO class label detected by the underlying vision model."
+          },
+          "confidence": {
+            "type": "number",
+            "minimum": 0.0,
+            "maximum": 1.0,
+            "description": "Model confidence normalized as a float in [0.0, 1.0]."
+          },
+          "bbox": {
+            "description": "Object bounding box in image coordinates.",
+            "oneOf": [
+              {
+                "type": "array",
+                "items": { "type": "number" },
+                "minItems": 4,
+                "maxItems": 4,
+                "description": "[x_min, y_min, x_max, y_max]"
+              },
+              {
+                "type": "object",
+                "required": ["x_min", "y_min", "x_max", "y_max"],
+                "additionalProperties": false,
+                "properties": {
+                  "x_min": { "type": "number" },
+                  "y_min": { "type": "number" },
+                  "x_max": { "type": "number" },
+                  "y_max": { "type": "number" }
+                }
+              }
+            ]
+          },
+          "category": {
+            "type": "string",
+            "description": "High-level waste category from taxonomy."
+          },
+          "material": {
+            "type": "string",
+            "enum": ["unknown", "plastic", "glass", "metal", "paper", "cardboard", "organic"]
+          },
+          "recyclable": {
+            "type": "string",
+            "enum": ["yes", "no", "estimated", "depends", "unknown"]
+          },
+          "biodegradable": {
+            "type": "string",
+            "enum": ["yes", "no", "estimated", "depends", "unknown"]
+          }
+        }
+      }
+    }
+  }
+}
