@@ -924,3 +924,96 @@ def test_video_feed_operator_auth_gate():
     assert out["unauth_status"] == 401
     assert out["bad_token_status"] == 401
     assert out["valid_token_status"] == 200
+
+
+def test_contract_schemas_and_command_state_machine_validation():
+    """
+    Phase 1 Contract Validation in EcoWing:
+    - detection-event.schema.json validates detection event fixtures and rejects confidence 50 / unknown class.
+    - command.schema.json validates drone commands and specifies valid state machine transitions.
+    """
+    import json
+    import yaml
+    import jsonschema
+    from pathlib import Path
+
+    contracts_dir = Path(__file__).resolve().parent / "contracts"
+    if not contracts_dir.exists():
+        contracts_dir = Path(__file__).resolve().parent.parent / "contracts"
+
+    det_schema_path = contracts_dir / "detection-event.schema.json"
+    cmd_schema_path = contracts_dir / "command.schema.json"
+    tax_path = contracts_dir / "taxonomy.yaml"
+
+    assert det_schema_path.exists(), f"{det_schema_path} missing"
+    assert cmd_schema_path.exists(), f"{cmd_schema_path} missing"
+    assert tax_path.exists(), f"{tax_path} missing"
+
+    with open(det_schema_path, "r", encoding="utf-8") as f:
+        det_schema = json.load(f)
+    with open(cmd_schema_path, "r", encoding="utf-8") as f:
+        cmd_schema = json.load(f)
+    with open(tax_path, "r", encoding="utf-8") as f:
+        taxonomy = yaml.safe_load(f)
+
+    # Validate schema definitions
+    jsonschema.Draft7Validator.check_schema(det_schema)
+    jsonschema.Draft7Validator.check_schema(cmd_schema)
+
+    # Test detection-event valid fixture
+    valid_event = {
+        "event_id": "00000000-0000-4000-8000-000000000001",
+        "drone_id": "Drone-01",
+        "source": "camera",
+        "observed_at": "2026-11-01T09:20:00Z",
+        "taxonomy_version": "1.0.0",
+        "classification_method": "coco_mapping",
+        "items": [
+            {
+                "class_id": "bottle",
+                "coco_label": "bottle",
+                "confidence": 0.92,
+                "bbox": [50.0, 50.0, 200.0, 300.0],
+                "category": "Container",
+                "material": "unknown",
+                "recyclable": "depends",
+                "biodegradable": "no"
+            }
+        ]
+    }
+    jsonschema.validate(instance=valid_event, schema=det_schema)
+
+    # Rejection of confidence 50
+    bad_conf = dict(valid_event)
+    bad_conf["items"] = [dict(valid_event["items"][0], confidence=50)]
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate(instance=bad_conf, schema=det_schema)
+
+    # Rejection of unknown class_id
+    bad_cid = dict(valid_event)
+    bad_cid["items"] = [dict(valid_event["items"][0], class_id="non_existent_class")]
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate(instance=bad_cid, schema=det_schema)
+
+    # Test command schema valid fixture
+    valid_cmd = {
+        "command_id": "11111111-2222-4333-8444-555555555555",
+        "drone_id": "Drone-01",
+        "command": "land",
+        "state": "requested",
+        "actor": "operator_console",
+        "created_at": "2026-11-01T09:20:00Z",
+        "updated_at": "2026-11-01T09:20:00Z"
+    }
+    jsonschema.validate(instance=valid_cmd, schema=cmd_schema)
+
+    # Verify state machine transitions specification
+    fsm = cmd_schema["state_machine_specification"]
+    assert fsm["initial_state"] == "requested"
+    assert "sent" in fsm["allowed_transitions"]["requested"]
+    assert "rejected" in fsm["allowed_transitions"]["requested"]
+    assert "acknowledged" in fsm["allowed_transitions"]["sent"]
+    assert "timed_out" in fsm["allowed_transitions"]["sent"]
+    assert "executing" in fsm["allowed_transitions"]["acknowledged"]
+    assert "completed" in fsm["allowed_transitions"]["executing"]
+
