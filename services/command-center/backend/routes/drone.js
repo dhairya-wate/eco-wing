@@ -17,6 +17,7 @@ const {
   verifyDroneToken
 } = require('../middleware/auth');
 const { validateDetectionPayload } = require('../validators/detectionValidator');
+const { commandManager } = require('../services/commandManager');
 
 // In-memory drone state when MongoDB is offline
 const memoryDrones = new Map();
@@ -403,6 +404,9 @@ router.post('/telemetry', verifyDroneToken, async (req, res) => {
         return res.status(400).json({ error: 'signal_strength_pct must be a valid number between 0 and 100.' });
       }
     }
+
+    // Record telemetry observation time for drone safety freshness guards (E9)
+    commandManager.recordTelemetry(drone_id, Date.now());
 
     if (mongoose.connection.readyState !== 1) {
       const io = req.app.get('io');

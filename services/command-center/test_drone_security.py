@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import subprocess
 import pytest
 
@@ -1135,5 +1136,170 @@ def test_detection_ingestion_canonical_schema_validation_and_rejection():
     assert out["status3"] == 400, f"Expected 400 for unknown class_id, got {out['status3']}"
     assert out["status4"] == 400, f"Expected 400 for non-UUID event_id, got {out['status4']}"
     assert out["status5"] == 400, f"Expected 400 for empty payload, got {out['status5']}"
+
+
+def test_e9_physical_drone_safety_controls_and_state_machine():
+    """
+    Physical Drone Safety Controls (E9):
+    1. Mandatory command IDs (UUIDv4) and state machine initialization (state='sent')
+    2. Rejection of invalid UUIDv4 command_id with HTTP 400
+    3. Valid state transitions: sent -> acknowledged -> executing -> completed (HTTP 200)
+    4. Rejection of illegal state transitions (sent -> completed) with HTTP 400
+    5. Rejection of commands when drone telemetry is stale (> 10s) with HTTP 409
+    6. Automatic command ACK timeout transitioning to 'timed_out'
+    """
+    code = """
+    const express = require('express');
+    const http = require('http');
+
+    process.env.ECOWING_OPERATOR_TOKEN = 'secure_test_operator_token_9xK2mP7qR4vL8wZ1';
+
+    const { router: apiRouter } = require('./backend/routes/api');
+    const { commandManager } = require('./backend/services/commandManager');
+
+    const app = express();
+    app.use(express.json());
+    app.use('/api', apiRouter);
+
+    const srv = http.createServer(app);
+    srv.listen(0, '127.0.0.1', async () => {
+        const port = srv.address().port;
+        const baseUrl = `http://127.0.0.1:${port}/api/drone/command`;
+        const headers = {
+            'Content-Type': 'application/json',
+            'X-Operator-Token': 'secure_test_operator_token_9xK2mP7qR4vL8wZ1'
+        };
+
+        // 1. Post valid flight command -> returns UUIDv4 and state='sent'
+        const r1 = await fetch(baseUrl, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({ drone_id: 'Drone-Test-1', command: 'start' })
+        });
+        const b1 = await r1.json();
+
+        // 2. Post command with invalid UUIDv4 command_id -> 400
+        const r2 = await fetch(baseUrl, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({ drone_id: 'Drone-Test-1', command: 'hold', command_id: 'not-a-uuid' })
+        });
+
+        // 3. Valid state transitions: sent -> acknowledged -> executing -> completed
+        const cmdId = b1.command_id;
+        const stateUrl = `${baseUrl}/${cmdId}/state`;
+
+        const rAck = await fetch(stateUrl, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({ state: 'acknowledged', reason: 'drone radio ack' })
+        });
+        const bAck = await rAck.json();
+
+        const rExec = await fetch(stateUrl, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({ state: 'executing', reason: 'motors spin' })
+        });
+        const bExec = await rExec.json();
+
+        const rComp = await fetch(stateUrl, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({ state: 'completed', reason: 'target altitude reached' })
+        });
+        const bComp = await rComp.json();
+
+        // 4. Illegal state transition: sent -> completed directly -> 400
+        const rIllegalInit = await fetch(baseUrl, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({ drone_id: 'Drone-Test-2', command: 'rth' })
+        });
+        const bIllegalInit = await rIllegalInit.json();
+        const rIllegalTrans = await fetch(`${baseUrl}/${bIllegalInit.command_id}/state`, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({ state: 'completed' })
+        });
+
+        // 5. Stale telemetry guard (> 10 seconds old) -> 409 Conflict
+        commandManager.recordTelemetry('Drone-Stale', Date.now() - 20000); // 20s old
+        const rStale = await fetch(baseUrl, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({ drone_id: 'Drone-Stale', command: 'land' })
+        });
+        const bStale = await rStale.json();
+
+        // Recover with fresh telemetry -> 200 OK
+        commandManager.recordTelemetry('Drone-Stale', Date.now());
+        const rFresh = await fetch(baseUrl, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({ drone_id: 'Drone-Stale', command: 'land' })
+        });
+
+        // 6. Command ACK timeout -> timed_out
+        const rTimeoutCmd = await fetch(baseUrl, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({ drone_id: 'Drone-Timeout', command: 'hold', ack_timeout_seconds: 0.08 })
+        });
+        const bTimeoutCmd = await rTimeoutCmd.json();
+        await new Promise(resolve => setTimeout(resolve, 120));
+
+        const rGetTimeout = await fetch(`${baseUrl}/${bTimeoutCmd.command_id}`, { headers });
+        const bGetTimeout = await rGetTimeout.json();
+
+        srv.close(() => {
+            console.log(JSON.stringify({
+                status1: r1.status,
+                cmdId1: b1.command_id,
+                state1: b1.state,
+                status2: r2.status,
+                statusAck: rAck.status,
+                stateAck: bAck.command ? bAck.command.state : null,
+                statusExec: rExec.status,
+                stateExec: bExec.command ? bExec.command.state : null,
+                statusComp: rComp.status,
+                stateComp: bComp.command ? bComp.command.state : null,
+                statusIllegal: rIllegalTrans.status,
+                statusStale: rStale.status,
+                staleError: bStale.error,
+                statusFresh: rFresh.status,
+                stateTimedOut: bGetTimeout.command ? bGetTimeout.command.state : null
+            }));
+        });
+    });
+    """
+    out = run_node_eval(code)
+    # 1. Valid command initiation
+    assert out["status1"] == 200
+    assert re.match(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$", out["cmdId1"])
+    assert out["state1"] == "sent"
+
+    # 2. Rejection of invalid UUID
+    assert out["status2"] == 400
+
+    # 3. Valid state transitions
+    assert out["statusAck"] == 200
+    assert out["stateAck"] == "acknowledged"
+    assert out["statusExec"] == 200
+    assert out["stateExec"] == "executing"
+    assert out["statusComp"] == 200
+    assert out["stateComp"] == "completed"
+
+    # 4. Illegal state transition
+    assert out["statusIllegal"] == 400
+
+    # 5. Stale telemetry guard
+    assert out["statusStale"] == 409
+    assert "Stale telemetry" in out["staleError"]
+    assert out["statusFresh"] == 200
+
+    # 6. ACK timeout
+    assert out["stateTimedOut"] == "timed_out"
+
 
 

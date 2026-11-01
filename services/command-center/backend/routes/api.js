@@ -7,6 +7,7 @@ const Telemetry = require('../models/Telemetry');
 const { getStreamStats } = require('../videoStream');
 const detectionStore = require('../detectionStore');
 const { verifyOperatorToken } = require('../middleware/auth');
+const { commandManager } = require('../services/commandManager');
 
 // E1: Whitelist definitions and identifier constraints
 const ALLOWED_DRONE_COMMANDS = ['start', 'hold', 'rth', 'land'];
@@ -329,6 +330,49 @@ router.post('/drone/command', verifyOperatorToken, async (req, res) => {
     }
 
     const cleanCommand = command.trim().toLowerCase();
+
+    // Physical Drone Safety: Stale Telemetry Guard (E9)
+    const freshness = commandManager.checkTelemetryFreshness(drone_id, 10.0);
+    if (!freshness.fresh && !freshness.missing) {
+      return res.status(409).json({
+        error: freshness.error,
+        age_seconds: freshness.age_seconds
+      });
+    }
+    if (req.headers['x-enforce-telemetry'] === 'true' && freshness.missing) {
+      return res.status(409).json({ error: freshness.error, missing: true });
+    }
+
+    // Formally initialize command lifecycle in state 'requested' and validate UUIDv4
+    let cmd;
+    try {
+      cmd = commandManager.createCommand({
+        drone_id,
+        command: cleanCommand,
+        params: req.body.params,
+        actor: req.body.actor || 'operator_console',
+        command_id: req.body.command_id
+      });
+    } catch (cmdErr) {
+      return res.status(400).json({ error: cmdErr.message });
+    }
+
+    // Transition state from 'requested' -> 'sent'
+    commandManager.transitionCommand(cmd.command_id, 'sent', 'Dispatched to drone command channel');
+
+    // Arm ACK timeout (default 5.0s)
+    const ackTimeoutSec = Number(req.body.ack_timeout_seconds) || 5.0;
+    commandManager.armAckTimeout(cmd.command_id, ackTimeoutSec, (timedOutCmd) => {
+      const io = req.app.get('io');
+      if (io) {
+        io.emit('command_timed_out', {
+          command_id: timedOutCmd.command_id,
+          drone_id,
+          reason: timedOutCmd.error_message
+        });
+      }
+    });
+
     const commandStatusMap = {
       start: 'Flying',
       hold: 'Holding',
@@ -341,10 +385,16 @@ router.post('/drone/command', verifyOperatorToken, async (req, res) => {
     if (mongoose.connection.readyState !== 1) {
       const io = req.app.get('io');
       if (io) {
-        io.emit('drone_command_executed', { command: cleanCommand, drone_id });
-        io.to(`drone:${drone_id}`).emit('command', { command: cleanCommand });
+        io.emit('drone_command_executed', { command: cleanCommand, drone_id, command_id: cmd.command_id });
+        io.to(`drone:${drone_id}`).emit('command', { command: cleanCommand, command_id: cmd.command_id });
       }
-      return res.json({ message: `${drone_id} received command: ${cleanCommand.toUpperCase()}`, mode: 'memory' });
+      return res.json({
+        message: `${drone_id} received command: ${cleanCommand.toUpperCase()}`,
+        command_id: cmd.command_id,
+        state: cmd.state,
+        command: cmd,
+        mode: 'memory'
+      });
     }
 
     const drone = await Drone.findOneAndUpdate(
@@ -359,8 +409,8 @@ router.post('/drone/command', verifyOperatorToken, async (req, res) => {
     const io = req.app.get('io');
     if (io) {
       // Forward command to drone and notify web clients
-      io.emit('drone_command_executed', { command, drone_id });
-      io.to(`drone:${drone_id}`).emit('command', { command });
+      io.emit('drone_command_executed', { command, drone_id, command_id: cmd.command_id });
+      io.to(`drone:${drone_id}`).emit('command', { command, command_id: cmd.command_id });
 
       // Update telemetry
       const drones = await Drone.find();
@@ -379,11 +429,52 @@ router.post('/drone/command', verifyOperatorToken, async (req, res) => {
       });
     }
 
-    res.json({ message: `${drone_id} received command: ${command.toUpperCase()}` });
+    res.json({
+      message: `${drone_id} received command: ${command.toUpperCase()}`,
+      command_id: cmd.command_id,
+      state: cmd.state,
+      command: cmd
+    });
   } catch (err) {
     console.error('Error in /api/drone/command:', err);
     res.status(500).json({ error: 'Failed to execute command' });
   }
+});
+
+/**
+ * POST /api/drone/command/:id/state
+ * Transition command state according to canonical state machine (contracts/command.schema.json)
+ */
+router.post('/drone/command/:id/state', verifyOperatorToken, (req, res) => {
+  const commandId = req.params.id;
+  const { state, reason } = req.body;
+  if (!state || typeof state !== 'string') {
+    return res.status(400).json({ error: "Missing required 'state' in body." });
+  }
+
+  const result = commandManager.transitionCommand(commandId, state.trim().toLowerCase(), reason);
+  if (!result.ok) {
+    return res.status(400).json({ error: result.error });
+  }
+
+  const io = req.app.get('io');
+  if (io) {
+    io.emit('command_state_changed', { command_id: commandId, state: result.command.state });
+  }
+
+  res.json({ success: true, command: result.command });
+});
+
+/**
+ * GET /api/drone/command/:id
+ * Retrieve command status and audit history
+ */
+router.get('/drone/command/:id', verifyOperatorToken, (req, res) => {
+  const cmd = commandManager.getCommand(req.params.id);
+  if (!cmd) {
+    return res.status(404).json({ error: `Command '${req.params.id}' not found.` });
+  }
+  res.json({ success: true, command: cmd });
 });
 
 /**
