@@ -1017,3 +1017,123 @@ def test_contract_schemas_and_command_state_machine_validation():
     assert "executing" in fsm["allowed_transitions"]["acknowledged"]
     assert "completed" in fsm["allowed_transitions"]["executing"]
 
+
+def test_detection_ingestion_canonical_schema_validation_and_rejection():
+    """
+    Phase 3.1: Canonical detection event schema validation on POST /api/drone/detection:
+    1. Valid canonical event with UUIDv4, source, taxonomy, items array -> 200 OK
+    2. Out-of-bounds confidence (1.5 or 50) -> 400 Bad Request
+    3. Unknown class_id outside taxonomy -> 400 Bad Request
+    4. Non-UUIDv4 event_id -> 400 Bad Request
+    5. Empty or missing fields -> 400 Bad Request
+    """
+    code = """
+    const express = require('express');
+    const http = require('http');
+
+    process.env.ECOWING_OPERATOR_TOKEN = 'secure_test_operator_token_9xK2mP7qR4vL8wZ1';
+    process.env.DRONE_DEVICE_TOKENS = JSON.stringify({
+        'drone-alpha': 'token_alpha_12345678901234567890'
+    });
+
+    const droneRouter = require('./backend/routes/drone');
+    const app = express();
+    app.use(express.json());
+    app.use('/api/drone', droneRouter);
+
+    const srv = http.createServer(app);
+    srv.listen(0, '127.0.0.1', async () => {
+        const port = srv.address().port;
+        const url = `http://127.0.0.1:${port}/api/drone/detection`;
+        const headers = {
+            'Content-Type': 'application/json',
+            'X-Drone-Token': 'token_alpha_12345678901234567890',
+            'X-Drone-Id': 'drone-alpha'
+        };
+
+        const validEvent = {
+            event_id: '12345678-1234-4234-8234-123456789abc',
+            drone_id: 'drone-alpha',
+            source: 'camera',
+            observed_at: '2026-11-01T04:00:00.000Z',
+            taxonomy_version: '1.0.0',
+            classification_method: 'coco_mapping',
+            items: [
+                {
+                    class_id: 'bottle',
+                    coco_label: 'bottle',
+                    confidence: 0.95,
+                    bbox: [100, 150, 200, 300],
+                    category: 'Container',
+                    material: 'plastic',
+                    recyclable: 'yes',
+                    biodegradable: 'no'
+                }
+            ]
+        };
+
+        // 1. Valid canonical event -> 200
+        const r1 = await fetch(url, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify(validEvent)
+        });
+        const b1 = await r1.json();
+
+        // 2. Out-of-bounds confidence -> 400
+        const badConf = JSON.parse(JSON.stringify(validEvent));
+        badConf.items[0].confidence = 1.5;
+        const r2 = await fetch(url, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify(badConf)
+        });
+
+        // 3. Unknown class_id -> 400
+        const badClass = JSON.parse(JSON.stringify(validEvent));
+        badClass.items[0].class_id = 'unmapped_plastic_box';
+        const r3 = await fetch(url, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify(badClass)
+        });
+
+        // 4. Non-UUID event_id -> 400
+        const badId = JSON.parse(JSON.stringify(validEvent));
+        badId.event_id = 'not-a-uuid';
+        const r4 = await fetch(url, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify(badId)
+        });
+
+        // 5. Empty payload -> 400
+        const r5 = await fetch(url, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({})
+        });
+
+        srv.close(() => {
+            console.log(JSON.stringify({
+                status1: r1.status,
+                success1: b1.success,
+                count1: b1.count,
+                status2: r2.status,
+                status3: r3.status,
+                status4: r4.status,
+                status5: r5.status
+            }));
+        });
+    });
+    """
+    out = run_node_eval(code)
+    assert out["status1"] == 200, f"Expected 200 for valid canonical event, got {out['status1']}"
+    assert out["success1"] is True
+    assert out["count1"] == 1
+    assert out["status2"] == 400, f"Expected 400 for bad confidence, got {out['status2']}"
+    assert out["status3"] == 400, f"Expected 400 for unknown class_id, got {out['status3']}"
+    assert out["status4"] == 400, f"Expected 400 for non-UUID event_id, got {out['status4']}"
+    assert out["status5"] == 400, f"Expected 400 for empty payload, got {out['status5']}"
+
+

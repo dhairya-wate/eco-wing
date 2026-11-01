@@ -16,9 +16,15 @@ const {
   getExpectedDroneToken
 } = require('../middleware/auth');
 
-const { validateTarget } = require('../routes/drone');
+const {
+  validateTarget
+} = require('../routes/drone');
 const { validateMongoUriConfig, allowedOrigins } = require('../app');
 const { verifySocketDroneAuth } = require('../server');
+const {
+  validateCanonicalDetectionEvent,
+  validateDetectionPayload
+} = require('../validators/detectionValidator');
 
 test('Operator Token Configuration Validation', async (t) => {
   await t.test('fails when operator token is empty', () => {
@@ -258,5 +264,106 @@ test('Video Feed Operator Auth Gate (/video_feed)', async (t) => {
     };
     verifyOperatorToken(req, res, () => { nextCalled = true; });
     assert.equal(nextCalled, true);
+  });
+});
+
+test('Canonical Detection Event Schema Validation', async (t) => {
+  const validEvent = {
+    event_id: '12345678-1234-4234-8234-123456789abc',
+    drone_id: 'Drone-Alpha',
+    source: 'camera',
+    observed_at: '2026-11-01T04:00:00.000Z',
+    taxonomy_version: '1.0.0',
+    classification_method: 'coco_mapping',
+    items: [
+      {
+        class_id: 'bottle',
+        coco_label: 'bottle',
+        confidence: 0.95,
+        bbox: [100, 150, 200, 300],
+        category: 'Container',
+        material: 'plastic',
+        recyclable: 'yes',
+        biodegradable: 'no'
+      }
+    ]
+  };
+
+  await t.test('accepts valid canonical detection event', () => {
+    const res = validateCanonicalDetectionEvent(validEvent);
+    assert.equal(res.valid, true);
+    assert.equal(res.errors.length, 0);
+
+    const payloadRes = validateDetectionPayload(validEvent);
+    assert.equal(payloadRes.valid, true);
+    assert.equal(payloadRes.isCanonical, true);
+  });
+
+  await t.test('rejects missing required event_id', () => {
+    const bad = { ...validEvent };
+    delete bad.event_id;
+    const res = validateCanonicalDetectionEvent(bad);
+    assert.equal(res.valid, false);
+    assert.ok(res.errors.some(e => e.includes('event_id')));
+  });
+
+  await t.test('rejects non-UUIDv4 event_id', () => {
+    const bad = { ...validEvent, event_id: 'not-a-valid-uuid' };
+    const res = validateCanonicalDetectionEvent(bad);
+    assert.equal(res.valid, false);
+    assert.ok(res.errors.some(e => e.includes('UUIDv4')));
+  });
+
+  await t.test('rejects confidence outside [0.0, 1.0] and non-finite values', () => {
+    const badHigh = {
+      ...validEvent,
+      items: [{ ...validEvent.items[0], confidence: 1.5 }]
+    };
+    assert.equal(validateCanonicalDetectionEvent(badHigh).valid, false);
+
+    const badNegative = {
+      ...validEvent,
+      items: [{ ...validEvent.items[0], confidence: -0.1 }]
+    };
+    assert.equal(validateCanonicalDetectionEvent(badNegative).valid, false);
+
+    const badPct = {
+      ...validEvent,
+      items: [{ ...validEvent.items[0], confidence: 50 }]
+    };
+    assert.equal(validateCanonicalDetectionEvent(badPct).valid, false);
+
+    const badNaN = {
+      ...validEvent,
+      items: [{ ...validEvent.items[0], confidence: NaN }]
+    };
+    assert.equal(validateCanonicalDetectionEvent(badNaN).valid, false);
+  });
+
+  await t.test('rejects unknown class_id not in canonical taxonomy', () => {
+    const bad = {
+      ...validEvent,
+      items: [{ ...validEvent.items[0], class_id: 'plastic_wrapper' }]
+    };
+    const res = validateCanonicalDetectionEvent(bad);
+    assert.equal(res.valid, false);
+    assert.ok(res.errors.some(e => e.includes('canonical taxonomy identifier')));
+  });
+
+  await t.test('rejects invalid source enum', () => {
+    const bad = { ...validEvent, source: 'satellite' };
+    const res = validateCanonicalDetectionEvent(bad);
+    assert.equal(res.valid, false);
+    assert.ok(res.errors.some(e => e.includes('source')));
+  });
+
+  await t.test('rejects invalid bbox format', () => {
+    const bad = {
+      ...validEvent,
+      items: [{ ...validEvent.items[0], bbox: [10, 20] }]
+    };
+    const res = validateCanonicalDetectionEvent(bad);
+    assert.equal(res.valid, false);
+    assert.ok(res.errors.some(e => e.includes('bbox')));
   });
 });

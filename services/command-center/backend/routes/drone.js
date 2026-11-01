@@ -16,6 +16,7 @@ const {
   verifyOperatorToken,
   verifyDroneToken
 } = require('../middleware/auth');
+const { validateDetectionPayload } = require('../validators/detectionValidator');
 
 // In-memory drone state when MongoDB is offline
 const memoryDrones = new Map();
@@ -464,6 +465,81 @@ router.post('/telemetry', verifyDroneToken, async (req, res) => {
 router.post('/detection', verifyDroneToken, async (req, res) => {
   try {
     const data = req.body;
+    const valResult = validateDetectionPayload(data);
+    if (!valResult.valid) {
+      return res.status(400).json({ error: `Detection validation failed: ${valResult.error}` });
+    }
+
+    // 1. Canonical Detection Event Ingestion (Array of items matching detection-event.schema.json)
+    if (valResult.isCanonical && Array.isArray(data.items)) {
+      const savedEvents = [];
+      const obsTime = data.observed_at ? new Date(data.observed_at) : new Date();
+
+      for (const item of data.items) {
+        const rawClass = String(item.class_id).toLowerCase();
+        let recyclable = false;
+        let category = item.category || 'General';
+        const recClasses = ['bottle', 'can', 'cup', 'plastic', 'glass', 'paper', 'cardboard', 'metal'];
+        if (recClasses.some(c => rawClass.includes(c))) {
+          recyclable = true;
+          if (rawClass.includes('plastic') || rawClass.includes('bottle')) category = 'Plastic';
+          else if (rawClass.includes('metal') || rawClass.includes('can')) category = 'Metal';
+          else if (rawClass.includes('glass')) category = 'Glass';
+          else if (rawClass.includes('paper') || rawClass.includes('cardboard')) category = 'Paper';
+        }
+        if (item.recyclable !== undefined) {
+          recyclable = ['yes', 'estimated'].includes(String(item.recyclable).toLowerCase());
+        }
+
+        const eventPayload = {
+          event_id: nextEventId++,
+          canonical_event_id: data.event_id,
+          drone_id: data.drone_id,
+          source: data.source,
+          class_name: rawClass,
+          coco_label: item.coco_label,
+          confidence: item.confidence,
+          category: category,
+          material: item.material || 'unknown',
+          recyclable: recyclable,
+          biodegradable: ['yes', 'estimated'].includes(String(item.biodegradable).toLowerCase()),
+          bbox: item.bbox,
+          location: { lat: 19.0760, lng: 72.8777 },
+          imageUrl: data.imageUrl || data.image_url || '',
+          verified: false,
+          timestamp: obsTime
+        };
+
+        detectionStore.addDetection(eventPayload);
+
+        if (mongoose.connection.readyState === 1) {
+          try {
+            const detectionDoc = new Detection(eventPayload);
+            await detectionDoc.save();
+          } catch (dbErr) {
+            console.warn('MongoDB save warning, kept in persistent store:', dbErr.message);
+          }
+        }
+
+        const io = req.app.get('io');
+        if (io) {
+          io.emit('new_detection', eventPayload);
+        }
+        savedEvents.push(eventPayload);
+      }
+
+      const io = req.app.get('io');
+      if (io) {
+        try {
+          const stats = await computeDashboardStats();
+          io.emit('stats_update', stats);
+        } catch (e) {}
+      }
+
+      return res.json({ success: true, count: savedEvents.length, events: savedEvents });
+    }
+
+    // 2. Legacy Detection Ingestion (Single item format)
     const rawClass = data.class_name || (data.waste_type ? String(data.waste_type).toLowerCase() : 'unknown');
 
     let recyclable = false;
