@@ -8,6 +8,7 @@ services:
       BACKEND_PORT: "3000"
       DETECTION_HOST: host.docker.internal
       DETECTION_PORT: "5000"
+      NGINX_ENVSUBST_VARS: "BACKEND_HOST BACKEND_PORT DETECTION_HOST DETECTION_PORT"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:

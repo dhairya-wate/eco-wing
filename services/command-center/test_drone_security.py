@@ -1432,3 +1432,55 @@ def test_e10_e11_docker_compose_and_node_engine_hardening():
     assert "healthcheck:" in compose_content
     assert "db.adminCommand('ping')" in compose_content
     assert "condition: service_healthy" in compose_content
+def test_op3_trusted_proxy_topology_and_spoofing_prevention():
+    """OP-3: X-Forwarded-For is ignored by default; only exact trusted proxy IP is accepted."""
+    code = """
+    const http = require('http');
+    const app = require('./backend/app');
+    const { isTrustedProxy, trustedProxySet } = require('./backend/app');
+
+    trustedProxySet.clear(); // Default: empty (untrusted)
+    const srv = http.createServer(app);
+    srv.listen(0, '127.0.0.1', async () => {
+        const port = srv.address().port;
+        try {
+            const isTrustedDefault = isTrustedProxy('127.0.0.1');
+
+            trustedProxySet.add('127.0.0.1');
+            const isTrustedNow = isTrustedProxy('127.0.0.1');
+            const isUntrustedOther = isTrustedProxy('192.168.1.100');
+
+            trustedProxySet.clear();
+
+            console.log(JSON.stringify({
+                isTrustedDefault,
+                isTrustedNow,
+                isUntrustedOther
+            }));
+        } catch (e) {
+            console.error(e);
+            console.log(JSON.stringify({ error: e.message }));
+        } finally {
+            srv.close();
+        }
+    });
+    """
+    out = run_node_eval(code)
+    assert out["isTrustedDefault"] is False
+    assert out["isTrustedNow"] is True
+    assert out["isUntrustedOther"] is False
+
+
+def test_op2_nginx_reverse_proxy_topology_and_video_gate():
+    """OP-2: Nginx configuration asserts client_max_body_size 5m, video gate 401, and streaming timeouts."""
+    nginx_path = os.path.join(ECOWING_DIR, "nginx.conf")
+    with open(nginx_path, "r", encoding="utf-8") as f:
+        conf = f.read()
+
+    assert "client_max_body_size 5m;" in conf
+    assert "location = /video_feed {" in conf
+    assert '$http_x_operator_token = ""' in conf
+    assert "return 401" in conf
+    assert "proxy_buffering off;" in conf
+    assert "proxy_cache off;" in conf
+    assert "proxy_read_timeout 86400s;" in conf

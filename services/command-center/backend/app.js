@@ -21,6 +21,23 @@ const { verifyOperatorToken } = require('./middleware/auth');
 
 const app = express();
 
+// Trusted proxy topology: exact IP matching (OP-3)
+// X-Forwarded-For is trusted ONLY when the direct peer socket is an explicitly configured trusted proxy IP.
+const rawTrustedProxies = process.env.ECOWING_TRUSTED_PROXIES || process.env.TRUSTED_PROXIES || '';
+const trustedProxySet = new Set(
+  rawTrustedProxies.split(',').map(s => s.trim().toLowerCase().replace(/^::ffff:/, '')).filter(Boolean)
+);
+
+function isTrustedProxy(ip) {
+  if (!ip) return false;
+  const clean = ip.trim().toLowerCase().replace(/^::ffff:/, '');
+  return trustedProxySet.has(clean);
+}
+
+app.set('trust proxy', (ip) => {
+  return isTrustedProxy(ip);
+});
+
 // E-NEW1: Restricted CORS configuration from environment allowlist
 const DEFAULT_CORS_ORIGINS = [
   'http://localhost:8080',
@@ -177,3 +194,5 @@ module.exports = app;
 module.exports.connectMongo = connectMongo;
 module.exports.validateMongoUriConfig = validateMongoUriConfig;
 module.exports.allowedOrigins = allowedOrigins;
+module.exports.isTrustedProxy = isTrustedProxy;
+module.exports.trustedProxySet = trustedProxySet;

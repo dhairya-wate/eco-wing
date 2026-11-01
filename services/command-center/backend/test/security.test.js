@@ -562,3 +562,60 @@ test('Infrastructure & Compose Hardening (E10, E11)', async (t) => {
     assert.match(composeContent, /condition:\s*service_healthy/, 'backend depends_on must require service_healthy condition');
   });
 });
+test('Trusted Proxy Topology & IP Extraction (OP-3)', async (t) => {
+  const http = require('http');
+  const app = require('../app');
+  const { isTrustedProxy, trustedProxySet } = require('../app');
+
+  await t.test('default trustedProxySet is empty, rejecting X-Forwarded-For spoofing', async () => {
+    trustedProxySet.clear();
+    const srv = http.createServer(app);
+    await new Promise(r => srv.listen(0, '127.0.0.1', r));
+    const port = srv.address().port;
+    try {
+      const res = await fetch(`http://127.0.0.1:${port}/health`, {
+        headers: { 'X-Forwarded-For': '203.0.113.195' }
+      });
+      assert.equal(res.status, 200);
+      assert.equal(isTrustedProxy('127.0.0.1'), false);
+    } finally {
+      srv.close();
+    }
+  });
+
+  await t.test('accepts X-Forwarded-For only when peer socket matches exact trusted proxy IP', async () => {
+    trustedProxySet.clear();
+    trustedProxySet.add('127.0.0.1');
+
+    const srv = http.createServer(app);
+    await new Promise(r => srv.listen(0, '127.0.0.1', r));
+    const port = srv.address().port;
+    try {
+      assert.equal(isTrustedProxy('127.0.0.1'), true);
+      assert.equal(isTrustedProxy('192.168.1.100'), false);
+      assert.equal(isTrustedProxy('172.18.0.5'), false);
+    } finally {
+      trustedProxySet.clear();
+      srv.close();
+    }
+  });
+});
+
+test('Nginx Reverse Proxy Configuration & Video Feed Gate (OP-2)', async (t) => {
+  const fs = require('fs');
+  const path = require('path');
+  const nginxConf = fs.readFileSync(path.join(__dirname, '..', '..', 'nginx.conf'), 'utf-8');
+
+  await t.test('nginx.conf defines client_max_body_size 5m', () => {
+    assert.match(nginxConf, /client_max_body_size\s+5m;/);
+  });
+
+  await t.test('nginx.conf gates /video_feed with operator token and disables buffering', () => {
+    assert.match(nginxConf, /location\s*=\s*\/video_feed\s*\{/);
+    assert.match(nginxConf, /\$http_x_operator_token\s*=\s*""/);
+    assert.match(nginxConf, /return\s*401/);
+    assert.match(nginxConf, /proxy_buffering\s+off;/);
+    assert.match(nginxConf, /proxy_cache\s+off;/);
+    assert.match(nginxConf, /proxy_read_timeout\s+86400s;/);
+  });
+});
