@@ -502,3 +502,27 @@ def test_contract_schema_and_taxonomy_validation():
     with pytest.raises(jsonschema.ValidationError):
         jsonschema.validate(instance=bad_class, schema=det_schema)
 
+
+
+def test_d14_model_provenance_and_sha256_checksum():
+    """
+    D14: Verifies model provenance, file existence, and immutable SHA256 checksum.
+    - Path: yolo26n.pt
+    - Base Architecture: YOLOv8 Nano (Ultralytics)
+    - Checksum: 9b09cc8bf347f0fc8a5f7657480587f25db09b34bf33b0652110fb03a8ad4fef
+    """
+    import hashlib
+    from config import MODEL_PATH
+    from detector import WasteDetector
+
+    assert MODEL_PATH.exists(), f"Model binary not found at {MODEL_PATH}"
+    h = hashlib.sha256()
+    with open(MODEL_PATH, "rb") as f:
+        while chunk := f.read(65536):
+            h.update(chunk)
+    actual_sha = h.hexdigest()
+    expected_sha = "9b09cc8bf347f0fc8a5f7657480587f25db09b34bf33b0652110fb03a8ad4fef"
+    assert actual_sha == expected_sha, f"Model SHA256 mismatch! Expected {expected_sha}, got {actual_sha}"
+
+    detector = WasteDetector()
+    assert len(detector.model.names) == 80, f"Expected 80 base COCO classes, found {len(detector.model.names)}"
