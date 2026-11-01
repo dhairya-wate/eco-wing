@@ -76,6 +76,13 @@ class DetectionWorker:
         if self.thread and self.thread.is_alive():
             self.thread.join(timeout=2.0)
 
+    @property
+    def is_worker_alive(self) -> bool:
+        """Returns True only if the worker flag is set and the background thread is actively alive."""
+        with self.lock:
+            running = self.is_running
+        return running and (self.thread is not None and self.thread.is_alive())
+
     def _run_loop(self):
         """Continuous detection loop running at capped frame rate."""
         while self.is_running:

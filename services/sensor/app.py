@@ -332,7 +332,7 @@ def get_system_info():
     
     return {
         "status": "online",
-        "worker_running": worker.is_running,
+        "worker_running": worker.is_worker_alive,
         "local_ip": LOCAL_IP,
         "port": DEFAULT_PORT,
         "video_stream_url": stream_url,

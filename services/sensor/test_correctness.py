@@ -222,8 +222,10 @@ def test_mobile_stream_frame_produces_detection_with_zero_viewers():
 def test_worker_frame_rate_cap_respects_max_fps():
     """
     Worker frame-rate cap respects DETECTION_MAX_FPS.
-    Verifies that the worker loop enforces the interval delay and does not exceed the configured FPS.
+    Verifies that default cap is 5.0 FPS and the worker loop enforces the interval delay.
     """
+    assert DETECTION_MAX_FPS == 5.0
+
     # Create an isolated worker configured with 10 FPS cap
     custom_worker = DetectionWorker(
         detector=WasteDetector(),
