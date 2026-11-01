@@ -674,3 +674,44 @@ def test_network_defaults_and_localhost_binding():
     assert "exit /b 1" in content
 
 
+def test_mobile_secure_context_enforcement(monkeypatch):
+    """
+    Verifies that:
+    1. GET /mobile returns 403 Forbidden when MOBILE_ENABLED=false (default).
+    2. When MOBILE_ENABLED=true:
+       - Access over loopback (localhost, 127.0.0.1) serves the mobile streaming page.
+       - Access over plain HTTP with a LAN IP host serves the Secure Context Required notice.
+       - Access over LAN IP with HTTPS (via X-Forwarded-Proto: https) serves the mobile streaming page.
+    """
+    import app as app_module
+
+    # 1. Disabled by default -> 403
+    monkeypatch.setattr(app_module, "MOBILE_ENABLED", False)
+    res_disabled = client.get("/mobile")
+    assert res_disabled.status_code == 403
+    assert "disabled by configuration" in res_disabled.json()["detail"]
+
+    # 2. Enabled + Loopback (localhost) -> 200 OK (mobile page)
+    monkeypatch.setattr(app_module, "MOBILE_ENABLED", True)
+    res_loopback = client.get("/mobile", headers={"Host": "127.0.0.1:5000"})
+    assert res_loopback.status_code == 200
+    assert "EcoWing Mobile" in res_loopback.text
+    assert "Secure Context Required" not in res_loopback.text
+
+    # 3. Enabled + Insecure LAN host (192.168.1.100 over plain HTTP) -> 200 OK (Secure Context Notice)
+    res_lan = client.get("/mobile", headers={"Host": "192.168.1.100:5000"})
+    assert res_lan.status_code == 200
+    assert "HTTPS Secure Context Required" in res_lan.text
+    assert "getUserMedia" in res_lan.text
+
+    # 4. Enabled + LAN host with HTTPS proxy header -> 200 OK (mobile page)
+    res_https = client.get("/mobile", headers={
+        "Host": "192.168.1.100:5000",
+        "X-Forwarded-Proto": "https"
+    })
+    assert res_https.status_code == 200
+    assert "EcoWing Mobile" in res_https.text
+    assert "HTTPS Secure Context Required" not in res_https.text
+
+
+

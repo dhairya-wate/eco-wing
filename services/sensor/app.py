@@ -583,14 +583,59 @@ async def websocket_telemetry(websocket: WebSocket):
     finally:
         active_websockets.discard(websocket)
 
+SECURE_CONTEXT_REQUIRED_HTML = """<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>HTTPS Secure Context Required</title>
+  <style>
+    body { background-color: #0d1117; color: #c9d1d9; font-family: sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; padding: 20px; box-sizing: border-box; }
+    .card { background-color: #161b22; border: 1px solid #30363d; border-radius: 12px; padding: 32px; max-width: 500px; text-align: center; }
+    h2 { color: #f85149; margin-top: 0; }
+    p { line-height: 1.6; color: #8b949e; }
+    code { background: #21262d; padding: 2px 6px; border-radius: 4px; color: #58a6ff; font-family: monospace; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h2>HTTPS Secure Context Required</h2>
+    <p>Mobile camera streaming requires a browser <strong>Secure Context</strong> (HTTPS or localhost) to access video sensors via <code>navigator.mediaDevices.getUserMedia</code>.</p>
+    <p>Because you are accessing this server over plain HTTP on a local network IP address, browser security restrictions prevent camera activation.</p>
+    <p>Please access this service via <strong>HTTPS</strong> through a secure reverse proxy (e.g. Nginx TLS) or connect from <code>localhost</code>.</p>
+  </div>
+</body>
+</html>
+"""
+
+def is_secure_context(request: Request) -> bool:
+    """
+    Checks if the incoming request originates from a browser Secure Context.
+    Browsers restrict navigator.mediaDevices.getUserMedia strictly to:
+    - HTTPS connections
+    - Loopback hosts (localhost, 127.0.0.1, [::1], testclient, testserver)
+    """
+    proto = request.headers.get("x-forwarded-proto", request.url.scheme).lower()
+    if proto == "https":
+        return True
+
+    host_header = request.headers.get("host", "")
+    host = host_header.split(":")[0].strip().lower() if host_header else (request.url.hostname or "").lower()
+    if host in ("localhost", "127.0.0.1", "::1", "testclient", "testserver"):
+        return True
+
+    return False
+
 @app.get("/mobile", response_class=HTMLResponse)
-def mobile_page():
-    """Serves the mobile phone camera streaming interface."""
+def mobile_page(request: Request):
+    """Serves the mobile phone camera streaming interface with Secure Context enforcement."""
     if not MOBILE_ENABLED:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Mobile camera streaming feature is disabled by configuration (MOBILE_ENABLED=false)."
         )
+    if not is_secure_context(request):
+        return HTMLResponse(content=SECURE_CONTEXT_REQUIRED_HTML, status_code=200)
+
     mobile_file = TEMPLATES_DIR / "mobile.html"
     if not mobile_file.exists():
         mobile_file = BASE_DIR / "templates" / "mobile.html"

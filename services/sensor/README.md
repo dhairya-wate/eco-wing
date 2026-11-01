@@ -101,6 +101,7 @@ When the server is running on your machine:
 
 3. **Hardened Mobile Camera Pairing Flow & Secure Context Transport:**
    - **Secure Context Requirement:** Camera access via `navigator.mediaDevices.getUserMedia` strictly requires a W3C Secure Context (`window.isSecureContext === true`). Modern web browsers treat only `https://` origins and `http://localhost` / `http://127.0.0.1` as secure contexts. Plain HTTP connections over a LAN (e.g. `http://192.168.1.X:5000/mobile`) block camera access completely.
+   - **Server-Side Enforcement:** `GET /mobile` checks request context (`localhost` or `HTTPS`). When accessed over plain HTTP on a LAN IP, it returns an informational Secure Context notice explaining the HTTPS requirement for `getUserMedia`.
    - Consequently, remote mobile streaming requires HTTPS (via an Nginx/Caddy TLS reverse proxy or secure tunnel).
    - Mobile streaming is **disabled by default** (`MOBILE_ENABLED=false`). Set `MOBILE_ENABLED=true` in `.env` to enable it.
    - To prevent leaking operator credentials to phone browsers, the operator generates an 8-character pairing code from an unambiguous alphabet via `POST /api/mobile/pairing_code`.
