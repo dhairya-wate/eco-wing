@@ -46,15 +46,16 @@ app.use(cors({
   credentials: true
 }));
 
+// E7: Restrict request body sizes to 5MB (mitigates memory exhaustion and payload DOS)
 // Raw binary body parser for raw JPEG stream frames
 app.use(express.raw({
   type: ['image/jpeg', 'image/png', 'application/octet-stream'],
-  limit: '20mb'
+  limit: '5mb'
 }));
 
 // Standard JSON body parser
-app.use(express.json({ limit: '20mb' }));
-app.use(express.urlencoded({ extended: true, limit: '20mb' }));
+app.use(express.json({ limit: '5mb' }));
+app.use(express.urlencoded({ extended: true, limit: '5mb' }));
 
 /**
  * Startup check: Validates that MONGO_URI includes credentials (user:password@).
@@ -144,6 +145,25 @@ app.use(express.static(path.join(__dirname, '..')));
 
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, '..', 'index.html'));
+});
+
+// Central error handling middleware (handles JSON parse errors and 413 Payload Too Large)
+app.use((err, req, res, next) => {
+  if (err.type === 'entity.too.large' || err.status === 413) {
+    return res.status(413).json({
+      status: 'error',
+      error: 'Payload Too Large',
+      message: 'Request body exceeds the maximum permitted limit of 5MB.'
+    });
+  }
+  if (err instanceof SyntaxError && err.status === 400 && 'body' in err) {
+    return res.status(400).json({
+      status: 'error',
+      error: 'Bad Request',
+      message: 'Malformed JSON payload.'
+    });
+  }
+  next(err);
 });
 
 module.exports = app;

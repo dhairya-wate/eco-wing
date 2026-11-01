@@ -1,3 +1,4 @@
+const { createRateLimiter } = require('../middleware/rateLimiter');
 const Telemetry = require('../models/Telemetry');
 process.env.NODE_ENV = 'test';
 const test = require('node:test');
@@ -473,5 +474,43 @@ test('Telemetry Model TTL Index Configuration (E8)', async (t) => {
     const ttlIndex = indexes.find(entry => entry[0] && entry[0].timestamp === 1 && typeof entry[1].expireAfterSeconds === 'number');
     assert.ok(ttlIndex, 'TTL index on timestamp must be defined');
     assert.equal(ttlIndex[1].expireAfterSeconds, Telemetry.TELEMETRY_TTL_SECONDS);
+  });
+});
+
+test('Ingestion Rate Limiting & Body Limits (E7)', async (t) => {
+  await t.test('createRateLimiter enforces window and max limits with 429 and Retry-After', () => {
+    const limiter = createRateLimiter({ windowMs: 5000, max: 2 });
+    const req = { ip: '1.2.3.4', authenticated_drone_id: 'Test-Drone' };
+    const headers = {};
+    let status = null;
+    let body = null;
+    const res = {
+      setHeader: (k, v) => { headers[k] = v; },
+      status: (c) => { status = c; return { json: (j) => { body = j; } }; }
+    };
+
+    let nextCount = 0;
+    limiter(req, res, () => { nextCount++; });
+    limiter(req, res, () => { nextCount++; });
+    assert.equal(nextCount, 2);
+
+    limiter(req, res, () => { nextCount++; });
+    assert.equal(nextCount, 2);
+    assert.equal(status, 429);
+    assert.equal(body.error, 'Too Many Requests');
+    assert.ok(headers['Retry-After'] >= 1);
+    limiter.cleanup();
+  });
+
+  await t.test('separate keys/drones maintain independent rate limit counters', () => {
+    const limiter = createRateLimiter({ windowMs: 5000, max: 1 });
+    const req1 = { authenticated_drone_id: 'Drone-Alpha' };
+    const req2 = { authenticated_drone_id: 'Drone-Beta' };
+    let c1 = 0, c2 = 0;
+    limiter(req1, { setHeader: () => {} }, () => { c1++; });
+    limiter(req2, { setHeader: () => {} }, () => { c2++; });
+    assert.equal(c1, 1);
+    assert.equal(c2, 1);
+    limiter.cleanup();
   });
 });

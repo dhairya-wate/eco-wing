@@ -16,6 +16,7 @@ const {
   verifyOperatorToken,
   verifyDroneToken
 } = require('../middleware/auth');
+const { ingestionRateLimiter } = require('../middleware/rateLimiter');
 const { validateDetectionPayload } = require('../validators/detectionValidator');
 const { commandManager } = require('../services/commandManager');
 
@@ -344,7 +345,7 @@ router.post('/disconnect', async (req, res) => {
  * POST /api/drone/telemetry
  * Ingest live telemetry from the connected drone and store in MongoDB
  */
-router.post('/telemetry', verifyDroneToken, async (req, res) => {
+router.post('/telemetry', verifyDroneToken, ingestionRateLimiter, async (req, res) => {
   try {
     const data = req.body;
     const drone_id = data.drone_id || 'Drone-01';
@@ -466,7 +467,7 @@ router.post('/telemetry', verifyDroneToken, async (req, res) => {
  * POST /api/drone/detection
  * Ingest a waste detection event from the AI camera and broadcast to dashboard
  */
-router.post('/detection', verifyDroneToken, async (req, res) => {
+router.post('/detection', verifyDroneToken, ingestionRateLimiter, async (req, res) => {
   try {
     const data = req.body;
     const valResult = validateDetectionPayload(data);
@@ -611,7 +612,7 @@ router.post('/detection', verifyDroneToken, async (req, res) => {
  * POST /api/drone/stream-frame
  * Ingest live camera frames sent from drone companion computer or mobile broadcaster
  */
-router.post('/stream-frame', verifyDroneToken, (req, res) => {
+router.post('/stream-frame', verifyDroneToken, ingestionRateLimiter, (req, res) => {
   try {
     const { frame } = req.body;
     if (!frame) {
@@ -630,3 +631,4 @@ module.exports.validateTarget = validateTarget;
 module.exports.validateOperatorTokenConfig = validateOperatorTokenConfig;
 module.exports.verifyOperatorToken = verifyOperatorToken;
 module.exports.verifyDroneToken = verifyDroneToken;
+module.exports.ingestionRateLimiter = ingestionRateLimiter;

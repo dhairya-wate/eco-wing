@@ -1316,3 +1316,64 @@ def test_e8_telemetry_ttl_index_configuration():
     assert out['defaultTTL'] == 604800
     assert out['hasTtlIndex'] is True
     assert out['expireAfterSeconds'] == 604800
+
+def test_e7_payload_size_limit_and_ingestion_rate_limiting():
+    code = """
+    const http = require('http');
+    const app = require('./backend/app');
+    const { createRateLimiter } = require('./backend/middleware/rateLimiter');
+
+    const srv = http.createServer(app);
+    srv.listen(0, '127.0.0.1', async () => {
+        const port = srv.address().port;
+        try {
+            // 1. Send 6MB payload (exceeds 5MB limit)
+            const bigPayload = 'A'.repeat(6 * 1024 * 1024);
+            const rOversize = await fetch(`http://127.0.0.1:${port}/api/drone/telemetry`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-Drone-Id': 'Drone-Alpha',
+                    'X-Drone-Token': 'drone_alpha_token_12345678901234567890'
+                },
+                body: JSON.stringify({ drone_id: 'Drone-Alpha', dummy: bigPayload })
+            });
+            const bOversize = await rOversize.json();
+
+            // 2. Rate limiter behavior with custom limiter
+            const testLimiter = createRateLimiter({ windowMs: 2000, max: 2 });
+            const mockReq = { authenticated_drone_id: 'Rate-Test-Drone' };
+            const headers = {};
+            let statusCode = 200;
+            let resJson = null;
+            const mockRes = {
+                setHeader: (k, v) => { headers[k] = v; },
+                status: (c) => { statusCode = c; return { json: (j) => { resJson = j; } }; }
+            };
+            let passCount = 0;
+            testLimiter(mockReq, mockRes, () => { passCount++; });
+            testLimiter(mockReq, mockRes, () => { passCount++; });
+            testLimiter(mockReq, mockRes, () => { passCount++; }); // 3rd request should be blocked (429)
+            testLimiter.cleanup();
+
+            console.log(JSON.stringify({
+                oversizeStatus: rOversize.status,
+                oversizeError: bOversize.error,
+                passCount: passCount,
+                rateLimitStatus: statusCode,
+                retryAfter: headers['Retry-After']
+            }));
+        } catch (e) {
+            console.error(e);
+            console.log(JSON.stringify({ error: e.message }));
+        } finally {
+            srv.close();
+        }
+    });
+    """
+    out = run_node_eval(code)
+    assert out["oversizeStatus"] == 413
+    assert out["oversizeError"] == "Payload Too Large"
+    assert out["passCount"] == 2
+    assert out["rateLimitStatus"] == 429
+    assert int(out["retryAfter"]) >= 1
