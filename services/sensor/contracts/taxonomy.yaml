@@ -1,0 +1,207 @@
+taxonomy_version: "1.0.0"
+classification_method: "coco_mapping"
+description: "Canonical waste taxonomy mapped strictly from supported MS-COCO object classes detected by YOLOv8n."
+
+allowed_property_values:
+  material: ["unknown", "plastic", "glass", "metal", "paper", "cardboard", "organic"]
+  recyclable: ["yes", "no", "estimated", "depends", "unknown"]
+  biodegradable: ["yes", "no", "estimated", "depends", "unknown"]
+
+classes:
+  bottle:
+    class_id: "bottle"
+    display_name: "Bottle"
+    coco_label: "bottle"
+    category: "Container"
+    material: "unknown"
+    recyclable: "depends"
+    biodegradable: "no"
+    reconciled_from: ["plastic_bottle", "glass_bottle", "bottle"]
+    notes: "COCO model detects bottle geometry only. Does not classify whether material is PET plastic, glass, or aluminum."
+
+  cup:
+    class_id: "cup"
+    display_name: "Cup"
+    coco_label: "cup"
+    category: "Container"
+    material: "unknown"
+    recyclable: "depends"
+    biodegradable: "depends"
+    reconciled_from: ["can", "tin", "paper_cup", "plastic_cup", "cup"]
+    notes: "COCO model detects cup/mug shapes. May be ceramic, single-use plastic, or wax-coated paper."
+
+  wine_glass:
+    class_id: "wine_glass"
+    display_name: "Wine Glass / Glassware"
+    coco_label: "wine glass"
+    category: "Glassware"
+    material: "unknown"
+    recyclable: "yes"
+    biodegradable: "no"
+    reconciled_from: ["glass", "wine_glass"]
+    notes: "Recyclable glass container."
+
+  fork:
+    class_id: "fork"
+    display_name: "Cutlery Scrap (Fork)"
+    coco_label: "fork"
+    category: "Cutlery"
+    material: "unknown"
+    recyclable: "depends"
+    biodegradable: "no"
+    reconciled_from: ["cutlery", "metal", "plastic", "fork"]
+    notes: "May be recyclable stainless steel or single-use plastic utensil."
+
+  knife:
+    class_id: "knife"
+    display_name: "Cutlery Scrap (Knife)"
+    coco_label: "knife"
+    category: "Cutlery"
+    material: "unknown"
+    recyclable: "depends"
+    biodegradable: "no"
+    reconciled_from: ["cutlery", "metal", "plastic", "knife"]
+    notes: "May be recyclable metal or plastic cutlery."
+
+  spoon:
+    class_id: "spoon"
+    display_name: "Cutlery Scrap (Spoon)"
+    coco_label: "spoon"
+    category: "Cutlery"
+    material: "unknown"
+    recyclable: "depends"
+    biodegradable: "no"
+    reconciled_from: ["cutlery", "metal", "plastic", "spoon"]
+    notes: "May be recyclable metal or plastic cutlery."
+
+  bowl:
+    class_id: "bowl"
+    display_name: "Bowl / Dishware"
+    coco_label: "bowl"
+    category: "Container"
+    material: "unknown"
+    recyclable: "depends"
+    biodegradable: "no"
+    reconciled_from: ["dishware", "bowl"]
+    notes: "May be ceramic, melamine, plastic, or paper pulp bowl."
+
+  banana:
+    class_id: "banana"
+    display_name: "Fruit Peel / Scrap (Banana)"
+    coco_label: "banana"
+    category: "Organic"
+    material: "unknown"
+    recyclable: "no"
+    biodegradable: "yes"
+    reconciled_from: ["organic", "food", "banana"]
+    notes: "Biodegradable organic compostable fruit waste."
+
+  apple:
+    class_id: "apple"
+    display_name: "Fruit Core / Scrap (Apple)"
+    coco_label: "apple"
+    category: "Organic"
+    material: "unknown"
+    recyclable: "no"
+    biodegradable: "yes"
+    reconciled_from: ["organic", "food", "apple"]
+    notes: "Biodegradable organic compostable fruit waste."
+
+  sandwich:
+    class_id: "sandwich"
+    display_name: "Food Scrap (Sandwich)"
+    coco_label: "sandwich"
+    category: "Organic"
+    material: "unknown"
+    recyclable: "no"
+    biodegradable: "yes"
+    reconciled_from: ["organic", "food", "sandwich"]
+    notes: "Biodegradable organic compostable food waste."
+
+  orange:
+    class_id: "orange"
+    display_name: "Fruit Peel (Orange)"
+    coco_label: "orange"
+    category: "Organic"
+    material: "unknown"
+    recyclable: "no"
+    biodegradable: "yes"
+    reconciled_from: ["organic", "food", "orange"]
+    notes: "Biodegradable organic compostable fruit waste."
+
+  broccoli:
+    class_id: "broccoli"
+    display_name: "Vegetable Scrap (Broccoli)"
+    coco_label: "broccoli"
+    category: "Organic"
+    material: "unknown"
+    recyclable: "no"
+    biodegradable: "yes"
+    reconciled_from: ["organic", "food", "vegetable", "broccoli"]
+    notes: "Biodegradable organic compostable vegetable waste."
+
+  carrot:
+    class_id: "carrot"
+    display_name: "Vegetable Scrap (Carrot)"
+    coco_label: "carrot"
+    category: "Organic"
+    material: "unknown"
+    recyclable: "no"
+    biodegradable: "yes"
+    reconciled_from: ["organic", "food", "vegetable", "carrot"]
+    notes: "Biodegradable organic compostable vegetable waste."
+
+  hot_dog:
+    class_id: "hot_dog"
+    display_name: "Food Scrap (Hot Dog)"
+    coco_label: "hot dog"
+    category: "Organic"
+    material: "unknown"
+    recyclable: "no"
+    biodegradable: "yes"
+    reconciled_from: ["organic", "food", "hot_dog"]
+    notes: "Biodegradable organic food waste."
+
+  pizza:
+    class_id: "pizza"
+    display_name: "Food Scrap (Pizza)"
+    coco_label: "pizza"
+    category: "Organic"
+    material: "unknown"
+    recyclable: "no"
+    biodegradable: "yes"
+    reconciled_from: ["organic", "food", "pizza"]
+    notes: "Biodegradable organic food waste."
+
+  donut:
+    class_id: "donut"
+    display_name: "Food Scrap (Donut)"
+    coco_label: "donut"
+    category: "Organic"
+    material: "unknown"
+    recyclable: "no"
+    biodegradable: "yes"
+    reconciled_from: ["organic", "food", "donut"]
+    notes: "Biodegradable organic food waste."
+
+  cake:
+    class_id: "cake"
+    display_name: "Food Scrap (Cake)"
+    coco_label: "cake"
+    category: "Organic"
+    material: "unknown"
+    recyclable: "no"
+    biodegradable: "yes"
+    reconciled_from: ["organic", "food", "cake"]
+    notes: "Biodegradable organic food waste."
+
+  book:
+    class_id: "book"
+    display_name: "Book / Reading Scrap"
+    coco_label: "book"
+    category: "Paper/Reading"
+    material: "unknown"
+    recyclable: "yes"
+    biodegradable: "yes"
+    reconciled_from: ["paper", "cardboard", "book"]
+    notes: "Cellulose fiber printed paper. Recyclable and biodegradable."

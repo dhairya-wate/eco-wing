@@ -1,0 +1,117 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "EcoWingDroneCommand",
+  "description": "Canonical schema and finite state machine for drone flight and payload commands.",
+  "type": "object",
+  "required": [
+    "command_id",
+    "drone_id",
+    "command",
+    "state",
+    "created_at",
+    "updated_at"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "command_id": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
+      "description": "Unique UUIDv4 identifying the flight command instance."
+    },
+    "drone_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[a-zA-Z0-9_-]+$",
+      "description": "Target drone identifier."
+    },
+    "command": {
+      "type": "string",
+      "enum": ["start", "hold", "rth", "land", "estop", "photo", "zoom"],
+      "description": "Flight or sensor action verb."
+    },
+    "params": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "Command-specific parameters (e.g. zoom factor, waypoint coordinates)."
+    },
+    "state": {
+      "type": "string",
+      "enum": [
+        "requested",
+        "sent",
+        "acknowledged",
+        "executing",
+        "completed",
+        "rejected",
+        "failed",
+        "timed_out"
+      ],
+      "description": "Current lifecycle state of the command."
+    },
+    "actor": {
+      "type": "string",
+      "description": "Operator identity or automated service that initiated the command."
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 UTC timestamp when command was requested."
+    },
+    "updated_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 UTC timestamp of last state transition."
+    },
+    "error_message": {
+      "type": "string",
+      "description": "Human-readable explanation if state is rejected, failed, or timed_out."
+    },
+    "state_history": {
+      "type": "array",
+      "description": "Audit trail of state transitions with timestamps.",
+      "items": {
+        "type": "object",
+        "required": ["state", "timestamp"],
+        "additionalProperties": false,
+        "properties": {
+          "state": {
+            "type": "string",
+            "enum": [
+              "requested",
+              "sent",
+              "acknowledged",
+              "executing",
+              "completed",
+              "rejected",
+              "failed",
+              "timed_out"
+            ]
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "reason": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  },
+  "state_machine_specification": {
+    "initial_state": "requested",
+    "terminal_states": ["completed", "rejected", "failed", "timed_out"],
+    "allowed_transitions": {
+      "requested": ["sent", "rejected"],
+      "sent": ["acknowledged", "timed_out", "failed", "rejected"],
+      "acknowledged": ["executing", "failed", "timed_out"],
+      "executing": ["completed", "failed", "timed_out"],
+      "completed": [],
+      "rejected": [],
+      "failed": [],
+      "timed_out": []
+    }
+  }
+}
