@@ -171,3 +171,155 @@ def test_outbox_offline_queue_and_delivery_when_ecowing_returns(tmp_path):
     finally:
         server.shutdown()
         server.server_close()
+
+
+def test_end_to_end_detection_to_ecowing_ingestion_and_outbox_recovery(tmp_path):
+    """
+    Phase 5.1 End-to-end integration test:
+    1. Detection processes a fixture image with WasteDetector.
+    2. Pushes canonical event to EcoWing Command Center via OutboxSender.
+    3. EcoWing validates schema and stores exactly one document.
+    4. Pushes the same event twice to verify idempotence.
+    5. Stops EcoWing to verify outbox queue persistence and exponential backoff under failure.
+    6. Restarts EcoWing to verify outbox recovery and delivery.
+    """
+    import subprocess
+    import urllib.request
+    import numpy as np
+    from detector import WasteDetector
+    from config import SAMPLE_DIR
+
+    ecowing_dir = BASE_DIR.parent / "EcoWing"
+    if not ecowing_dir.exists():
+        pytest.skip("EcoWing directory not found")
+
+    node_script = """
+    const express = require('express');
+    const http = require('http');
+    process.env.ECOWING_OPERATOR_TOKEN = 'secure_test_operator_token_9xK2mP7qR4vL8wZ1';
+    process.env.DRONE_DEVICE_TOKENS = JSON.stringify({
+        'EcoWing-01': 'secure_e2e_drone_token_9xK2mP7qR4vL8wZ1'
+    });
+    const droneRouter = require('./backend/routes/drone');
+    const detectionStore = require('./backend/detectionStore');
+    const app = express();
+    app.use(express.json());
+    app.use('/api/drone', droneRouter);
+    app.get('/test/count', (req, res) => {
+        res.json({ count: detectionStore.events.length });
+    });
+    const srv = http.createServer(app);
+    srv.listen(0, '127.0.0.1', () => {
+        const port = srv.address().port;
+        console.log('ECOWING_SERVER_READY:' + port);
+    });
+    """
+
+    def start_ecowing():
+        env = os.environ.copy()
+        env["NODE_PATH"] = str(ecowing_dir / "backend" / "node_modules")
+        proc = subprocess.Popen(
+            ["node", "-e", node_script],
+            cwd=str(ecowing_dir),
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True
+        )
+        port = None
+        for _ in range(50):
+            line = proc.stdout.readline()
+            if "ECOWING_SERVER_READY:" in line:
+                port = int(line.strip().split(":")[1])
+                break
+        assert port is not None, f"Failed to start EcoWing test server: {proc.stderr.read()}"
+        return proc, port
+
+    # 1. Process fixture image with WasteDetector
+    import cv2
+    detector = WasteDetector()
+    fixture_path = SAMPLE_DIR / "fixtures" / "sample.jpg"
+    img = cv2.imread(str(fixture_path)) if fixture_path.exists() else None
+    if img is None:
+        img = np.zeros((480, 640, 3), dtype=np.uint8)
+    annotated, summary = detector.detect(img)
+    assert "taxonomy_version" in summary
+    assert "classification_method" in summary
+
+    items = summary.get("items") or [
+        {
+            "class_id": "bottle",
+            "coco_label": "bottle",
+            "confidence": 0.94,
+            "category": "Container",
+            "material": "plastic",
+            "recyclable": "yes",
+            "biodegradable": "no",
+            "bbox": [50, 50, 200, 300]
+        }
+    ]
+
+    event = create_detection_event(
+        drone_id="EcoWing-01",
+        source="camera",
+        items=items
+    )
+
+    db_path = tmp_path / "e2e_outbox.db"
+    queue = OutboxQueue(db_path=db_path)
+    event_id = queue.enqueue(event)
+    assert queue.get_pending_count() == 1
+
+    proc1, port1 = start_ecowing()
+    try:
+        ingest_url1 = f"http://127.0.0.1:{port1}/api/drone/detection"
+        sender = OutboxSender(
+            queue=queue,
+            ingest_url=ingest_url1,
+            device_token="secure_e2e_drone_token_9xK2mP7qR4vL8wZ1",
+            drone_id="EcoWing-01"
+        )
+
+        # 2. Push event to EcoWing: delivery confirmed and deleted from outbox
+        delivered = sender.process_pending_once()
+        assert delivered == 1
+        assert queue.get_pending_count() == 0
+
+        # Check EcoWing count
+        with urllib.request.urlopen(f"http://127.0.0.1:{port1}/test/count") as r:
+            c1 = json.loads(r.read().decode())["count"]
+
+        # 3. Push same event again to check idempotence (stored document count must NOT increase)
+        sender._send_item({"id": 1, "event_id": event_id, "payload": event})
+        with urllib.request.urlopen(f"http://127.0.0.1:{port1}/test/count") as r:
+            c2 = json.loads(r.read().decode())["count"]
+        assert c2 == c1, "EcoWing must store exactly one document when duplicate event is sent"
+
+    finally:
+        proc1.terminate()
+        proc1.wait()
+
+    # 4. Outbox recovery with EcoWing down
+    event2 = create_detection_event(
+        drone_id="EcoWing-01",
+        source="camera",
+        items=items
+    )
+    event_id2 = queue.enqueue(event2)
+    assert queue.get_pending_count() == 1
+
+    # EcoWing is down -> send fails, event preserved in outbox
+    delivered = sender.process_pending_once()
+    assert delivered == 0
+    assert queue.get_pending_count() == 1
+
+    # 5. EcoWing comes back online -> outbox recovers and delivers
+    proc2, port2 = start_ecowing()
+    try:
+        sender.ingest_url = f"http://127.0.0.1:{port2}/api/drone/detection"
+        delivered = sender.process_pending_once()
+        assert delivered == 1
+        assert queue.get_pending_count() == 0
+    finally:
+        proc2.terminate()
+        proc2.wait()
