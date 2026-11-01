@@ -16,13 +16,13 @@ from starlette.websockets import WebSocketDisconnect
 
 # Environment variables are already set by conftest.py prior to importing app
 from app import (
-    app, active_pairing_codes, active_mobile_sessions,
+    app, worker, active_pairing_codes, active_mobile_sessions,
     ip_failed_exchange_attempts, ip_exchange_rate_limits,
     prune_stale_records, get_client_ip, parse_image_dimensions,
     active_mobile_websockets, pending_mobile_websockets,
     CLOSE_REASONS, MAX_MOBILE_WS_CONNECTIONS
 )
-from config import MAX_UPLOAD_SIZE_BYTES, BASE_DIR
+from config import MAX_UPLOAD_SIZE_BYTES, BASE_DIR, sanitize_source_url
 import asyncio
 import websockets
 from conftest import TEST_OPERATOR_TOKEN
@@ -712,6 +712,64 @@ def test_mobile_secure_context_enforcement(monkeypatch):
     assert res_https.status_code == 200
     assert "EcoWing Mobile" in res_https.text
     assert "HTTPS Secure Context Required" not in res_https.text
+
+
+def test_worker_running_detects_dead_thread():
+    """
+    Verifies that worker_running in /api/system_info returns False if the
+    worker thread dies or terminates, even if the is_running flag was True.
+    """
+    # 1. Start worker and verify it reports alive
+    worker.start()
+    assert worker.is_worker_alive is True
+    res_alive = client.get("/api/system_info", headers={"X-Operator-Token": TEST_OPERATOR_TOKEN})
+    assert res_alive.status_code == 200
+    assert res_alive.json()["worker_running"] is True
+
+    # 2. Simulate worker thread death while is_running remains True
+    dead_thread = threading.Thread(target=lambda: None)
+    dead_thread.start()
+    dead_thread.join()
+    with worker.lock:
+        worker.thread = dead_thread
+        worker.is_running = True
+
+    assert worker.is_worker_alive is False
+
+    # 3. Query /api/system_info and verify worker_running detects dead thread
+    res_dead = client.get("/api/system_info", headers={"X-Operator-Token": TEST_OPERATOR_TOKEN})
+    assert res_dead.status_code == 200
+    assert res_dead.json()["worker_running"] is False
+
+    # 4. Clean teardown
+    worker.stop()
+
+
+def test_sanitize_source_url_redacts_credentials():
+    """
+    Verifies that sanitize_source_url strips passwords and user credentials from
+    RTSP and HTTP streaming URLs to avoid credential leakage in logs and APIs.
+    """
+    # RTSP with user and password
+    url1 = "rtsp://admin:super_secret_pw@192.168.1.120:554/live/ch0"
+    clean1 = sanitize_source_url(url1)
+    assert "super_secret_pw" not in clean1
+    assert "admin:***@192.168.1.120:554" in clean1
+
+    # HTTP stream with user and password
+    url2 = "http://operator:drone_flight_pw123@drone.internal:8080/mjpeg"
+    clean2 = sanitize_source_url(url2)
+    assert "drone_flight_pw123" not in clean2
+    assert "operator:***@drone.internal:8080" in clean2
+
+    # Clean URL with no credentials remains untouched
+    url_clean = "rtsp://192.168.1.50:554/stream"
+    assert sanitize_source_url(url_clean) == url_clean
+
+    # Simulator / non-URL source
+    assert sanitize_source_url("simulator") == "simulator"
+    assert sanitize_source_url("") == ""
+
 
 
 
