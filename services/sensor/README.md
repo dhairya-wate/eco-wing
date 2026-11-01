@@ -1,232 +1,137 @@
-# 🌱 EcoWing Waste Detection & Streaming System
+# 🌱 EcoWing Waste Detection & Edge Sensor System
 
-A real-time AI computer vision software designed for the **EcoWing Project**. It detects waste items, classifies them into **Recyclable / Non-Recyclable** and **Biodegradable / Non-Biodegradable**, and streams live video directly to the EcoWing website over a local network or IP address.
-
----
-
-## 🚀 Key Features
-
-1. **Pretrained YOLO AI Detection:**
-   - Uses standard 80-class COCO pretrained YOLO (`yolo26n.pt`).
-   - Mapped COCO object classes are categorized into waste taxonomy items.
-   - **Note:** The model does **NOT** directly detect materials such as paper, glass, cans, or plastic. Only recognized COCO objects (e.g. bottles, cups, cutlery, food scraps) are mapped to waste properties.
-   - Strictly ignores unmapped non-waste classes (e.g. person, car, dog, chair).
-
-2. **Dual-Axis Eco Classification:**
-   - **Recyclable:** `YES` or `NO`
-   - **Biodegradable:** `YES` or `NO`
-   - **Disposal Recommendation:** Identifies the correct bin (Blue, Green, Yellow, Cyan, Landfill).
-
-3. **High-Performance Website Live Streaming:**
-   - Streams live annotated video over MJPEG (`/video_feed`).
-   - Any website can embed it with a simple `<img>` tag without plugins or complex players.
-   - Fully enabled with **CORS** for seamless cross-origin communication.
-
-4. **Real-Time Telemetry & REST API:**
-   - `/api/detections`: Live JSON feed of detected items, confidence scores, bounding boxes, and eco-counts.
-   - `/ws`: High-speed WebSocket connection for live telemetry push.
-
-5. **Built-in Web Control Hub (`http://<IP>:5000`):**
-   - Live preview monitor with toggleable HUD overlay.
-   - Dynamic confidence threshold slider.
-   - Source switcher (Webcam 0, Webcam 1, Demo Simulator, RTSP stream, or video file).
-   - Drag-and-drop test image analyzer.
+A high-performance real-time AI computer vision system designed for the **EcoWing Autonomous Drone Fleet**. It runs on drone companion computers and field edge nodes to detect waste items, perform dual-axis classification (**Recyclable** and **Biodegradable**), and stream structured telemetry and live annotated video to the **EcoWing Command Center**.
 
 ---
 
-## 📡 Live Stream & Website Connection Links
+## 🏗️ System Architecture & Data Flow
 
-When the server is running on your machine:
+```mermaid
+flowchart TD
+    subgraph EdgeDevice["Drone Companion Computer / Edge Sensor Node (Detection System)"]
+        Cam["Physical Camera / Mobile Streamer"] -->|Frames| StreamMgr["VideoStreamManager"]
+        StreamMgr -->|Capped FPS| Worker["DetectionWorker (Background Thread)"]
+        Worker -->|Inference (Outside Lock)| YOLO["WasteDetector (YOLOv8 Nano: yolo26n.pt)"]
+        YOLO -->|Taxonomy Filter| MapTable["COCO-to-Waste Mapping (contracts/taxonomy.yaml)"]
+        MapTable -->|Canonical Events| OutboxQ["OutboxQueue (Persistent SQLite: outbox.db)"]
+        OutboxQ -->|X-Drone-Token Auth| OutboxSender["OutboxSender (Exponential Backoff)"]
+        Worker -->|Latest JPEG Under Lock| MJPEG["MJPEG Generator (/video_feed)"]
+    end
+
+    subgraph ProxyGateway["Reverse-Proxy Security Boundary (Port 8080)"]
+        Nginx["Nginx Reverse Proxy"]
+        Gate["X-Operator-Token Auth Gate"]
+    end
+
+    subgraph CommandCenter["Command Center (EcoWing Repository)"]
+        Ingest["EcoWing Ingestion API (/api/drone/detection)"]
+        Store["Idempotent Storage (DetectionStore / MongoDB)"]
+        Dash["Pilot Dashboard (HTML / Socket.IO)"]
+    end
+
+    OutboxSender -->|Canonical HTTP POST| Ingest
+    Ingest --> Store
+    Store --> Dash
+    MJPEG --> Gate
+    Gate --> Nginx
+    Nginx -->|Same-Origin Stream| Dash
+```
+
+---
+
+## 🔒 Trust Boundaries & Network Topology
+
+| Component | Network Binding | Default Host/Port | Access Rule & Authentication | Trust Boundary |
+| :--- | :--- | :--- | :--- | :--- |
+| **Detection API** | Localhost only | `127.0.0.1:5000` | Loopback only. LAN requires `ALLOW_LAN=true`. | Internal loopback / Edge container |
+| **Operator Endpoints** | Localhost / Nginx | `/api/settings`, `/api/upload`, `/api/system_info` | Strictly requires `X-Operator-Token` header (min 32 chars). | Trusted Operator |
+| **Outbox Egress** | Client HTTP Egress | Outbound to EcoWing `/api/drone/detection` | Strictly transmits `X-Drone-Token` and `X-Drone-Id`. | Authenticated Drone Telemetry Link |
+| **Mobile Stream Ingest** | Localhost / Nginx | `/mobile`, `/ws/mobile_stream` | Enforces browser Secure Context; in-band session token required. | Field Mobile Sensor |
+| **Video Stream** | Localhost / Nginx | `/video_feed` | Gated by Nginx reverse proxy with operator authentication. | Edge-to-Proxy Stream |
+
+---
+
+## 🚀 Key Architectural Capabilities
+
+1. **Edge Inference with Structured Outbox Push (ADR 0003):**
+   - Inference runs locally on edge companion computers using a dedicated background worker (`worker.py`).
+   - Rather than saturating wireless drone links by streaming continuous raw video for centralized processing, Detection pushes compact JSON detection events (~1 KB) to EcoWing.
+   - Events are buffered locally in an SQLite persistent outbox queue (`outbox.db`). If wireless signal is lost, events are preserved and delivered automatically with exponential backoff upon reconnection.
+
+2. **Decoupled Background Inference Worker:**
+   - Dedicated `DetectionWorker` runs at a fixed, configurable frame rate governed by `DETECTION_MAX_FPS` (default 30.0 FPS).
+   - Inference executes **outside** the worker thread lock, ensuring that API readers and MJPEG viewers are never blocked by PyTorch or OpenCV computations.
+   - Inference does not scale with viewer connections; 0 viewers or 10 viewers consume identical compute resources.
+
+3. **Pretrained YOLO AI Detection & Model Provenance (D14):**
+   - **Model Binary:** `yolo26n.pt`
+   - **Base Architecture:** YOLOv8 Nano (Ultralytics) trained on base 80-class COCO.
+   - **Model Checksum (SHA256):** `9b09cc8bf347f0fc8a5f7657480587f25db09b34bf33b0652110fb03a8ad4fef`
+   - **Provenance Note:** The model detects standard COCO objects. It does **NOT** directly detect materials like raw plastic, glass, or paper. Only recognized COCO objects are mapped to waste properties via `config.COCO_WASTE_MAPPING`.
+   - Unmapped non-waste classes (e.g. `person`, `car`, `dog`) are suppressed and never reported as waste.
+
+4. **Dual-Axis Eco Classification:**
+   - **Recyclable:** `"yes"`, `"no"`, `"estimated"`, `"depends"`, or `"unknown"`
+   - **Biodegradable:** `"yes"`, `"no"`, `"estimated"`, `"depends"`, or `"unknown"`
+   - **Disposal Recommendation:** Directs waste to designated bin categories (Blue, Green, Yellow, Cyan, Mixed).
+
+---
+
+## 📡 Endpoints & Integration Interface
 
 | Feature | Endpoint URL | Auth Required | Description |
 | :--- | :--- | :---: | :--- |
-| **Web Dashboard** | `http://localhost:5000` | Optional | Browser control interface |
-| **Video Stream URL** | `http://<IP>:5000/video_feed` | Public | Direct MJPEG video feed for website embed |
-| **Telemetry API** | `http://<IP>:5000/api/detections` | Public | Live waste counts & classification JSON |
-| **WebSocket** | `ws://<IP>:5000/ws` | Public | Low-latency live telemetry stream |
-| **Settings Control** | `POST http://<IP>:5000/api/settings` | `X-Operator-Token` | Adjust confidence and video source |
-| **Image Upload** | `POST http://<IP>:5000/api/upload` | `X-Operator-Token` | Upload image for waste analysis (max 5 MB) |
-| **System Info** | `GET http://<IP>:5000/api/system_info` | `X-Operator-Token` | System configuration (redacted URLs) |
-| **Mobile Pairing** | `POST http://<IP>:5000/api/mobile/pairing_code` | `X-Operator-Token` | Generate 6-char pairing code (5 min TTL) |
-| **Code Exchange** | `POST http://<IP>:5000/api/mobile/exchange` | Public | Exchange pairing code for scoped session |
-| **Mobile Stream WS** | `ws://<IP>:5000/ws/mobile_stream` | In-band session auth | Phone camera stream ingest |
-
-> [!IMPORTANT]
-> **API Contract Change Notice (`/api/detections` & `/api/system_info`):**
->
-> 1. **Confidence Normalization (`/api/detections`):**
->    - **Old Contract:** `item.confidence` was returned as a percentage float between `0.0` and `100.0` (e.g. `94.5`).
->    - **New Contract:** `item.confidence` is now normalized to a standard unit float between `0.0` and `1.0` (e.g. `0.9450`).
->    - **Migration Notes:** Clients displaying confidence must format for display (e.g. `Math.round(item.confidence * 100)` in JS or `f"{conf*100:.1f}%"` in Python).
->
-> 2. **Recyclable & Biodegradable Enums (`/api/detections`):**
->    - **Old Contract:** `item.recyclable` and `item.biodegradable` were booleans (`true`/`false`).
->    - **New Contract:** Now strict categorical enums: `"yes"`, `"no"`, `"estimated"`, `"depends"`, or `"unknown"`.
->    - **Migration Notes:** Update boolean checks from `if (item.recyclable)` to `['yes', 'estimated'].includes(item.recyclable)`.
->
-> 3. **Additive & Restored Fields (`/api/detections`):**
->    - `scope`: `"live_frame"`. Explicitly indicates that counts represent the instantaneous active video frame window only and are NOT cumulative mission totals (cumulative fleet statistics are maintained separately in EcoWing Command Center).
->    - `timestamp`: Unix float epoch timestamp (e.g. `1793215978.123456`). Preserves original float type.
->    - `timestamp_iso`: ISO 8601 UTC string (e.g. `2026-11-01T07:35:12.345678+00:00`).
->    - `age_seconds`: Float indicating elapsed seconds since the latest inference update.
->    - `stale`: Boolean (`true` if `age_seconds > DETECTION_STALE_AFTER_SECONDS` [default 5s]).
->    - `data.taxonomy_version`: Currently `"1.0.0"`.
->    - `data.classification_method`: `"coco_mapping"`.
->    - `item.coco_label`: Ground-truth COCO class label.
->    - `item.material`: Material string (defaults to `"unknown"` unless determined by a material model).
->    - `item.model_supported`: Boolean `true`.
->
-> 4. **Confidence Unit on Settings (`POST /api/settings`):**
->    - `confidence`: Accepts standard unit float in `[0.0, 1.0]` (e.g. `0.5` sets 50% threshold).
->    - Legacy percentage values (`50`) and out-of-range floats are strictly rejected with HTTP 400 Bad Request.
->
-> 5. **System Info & Worker Status (`/api/system_info`):**
->    - `worker_running`: Boolean indicating whether background detection worker thread is actively processing frames.
->    - Strictly requires `X-Operator-Token` header. Query parameter `?token=` is rejected with HTTP 401.
+| **Web Diagnostic Hub** | `http://localhost:5000` | Optional | Edge sensor visual diagnostic interface |
+| **Video Stream URL** | `http://localhost:8080/video_feed` | Operator Token (via Proxy) | MJPEG live stream for web dashboard embedding |
+| **Telemetry API** | `http://localhost:5000/api/detections` | Public (Read-only) | Instantaneous active frame waste counts & JSON metadata |
+| **WebSocket** | `ws://localhost:5000/ws` | Public | Live telemetry broadcast socket |
+| **Settings Control** | `POST /api/settings` | `X-Operator-Token` | Adjust confidence unit float (`[0.0, 1.0]`) and input source |
+| **Image Upload** | `POST /api/upload` | `X-Operator-Token` | Upload test image for waste analysis (max 5 MB) |
+| **System Info** | `GET /api/system_info` | `X-Operator-Token` | System configuration (redacted URLs, relative paths) |
+| **Mobile Pairing** | `POST /api/mobile/pairing_code` | `X-Operator-Token` | Generate 6-char pairing code (5 min TTL) |
+| **Code Exchange** | `POST /api/mobile/exchange` | Public | Exchange pairing code for scoped session |
+| **Mobile Stream WS** | `ws://localhost:5000/ws/mobile_stream` | In-band session auth | Phone camera stream ingest |
 
 ---
 
-## 🔒 Security & Operator Authentication
+## 🔒 Security Architecture & Guardrails
 
-1. **Deployment Architecture Decision:**
-   - **Local Behind Nginx:** EcoWing and Detection are designed to run locally on-premises or on a field computer behind Nginx.
-   - **Remote Access via VPN:** Remote monitoring or mobile connections outside the local LAN must use an encrypted VPN (e.g. WireGuard, Tailscale). Never expose raw ports to the public internet.
-   - **Vercel Demo Notice:** The public Vercel frontend is an unlinked static preview. It does not connect to the local backend due to HTTPS Mixed Content restrictions.
+1. **Operator Authorization (`DETECTION_OPERATOR_TOKEN`):**
+   - Startup validation enforces a minimum of 32 characters, 12 unique characters, and non-repeating entropy.
+   - If unset or weak, the service fails fast and refuses to boot.
+   - Sensitive control endpoints (`/api/settings`, `/api/upload`, `/api/system_info`, `/api/mobile/pairing_code`) require `X-Operator-Token`.
 
-2. **Operator Authorization & Fail-Fast Startup:**
-   - Detection requires `DETECTION_OPERATOR_TOKEN` to be set to a cryptographically secure token of at least 32 characters.
-   - The token must contain at least 12 distinct characters and must not consist of repeated periodic patterns (e.g. `"abcd" * 9` or `"a" * 36`).
-   - The server fails fast on startup with a critical error if the token is unset, shorter than 32 characters, or repetitive.
-   - Sensitive endpoints (`/api/settings`, `/api/upload`, `/api/system_info`, `/api/mobile/pairing_code`) strictly require the `X-Operator-Token` header.
+2. **Default Localhost Binding & Tunnel Elimination (D2):**
+   - Server binds strictly to `127.0.0.1` by default. Binding to `0.0.0.0` requires explicit `ALLOW_LAN=true`.
+   - Insecure third-party tunnels (`start_tunnel.bat`) have been permanently disabled with exit code 1.
 
-3. **Hardened Mobile Camera Pairing Flow & Secure Context Transport:**
-   - **Secure Context Requirement:** Camera access via `navigator.mediaDevices.getUserMedia` strictly requires a W3C Secure Context (`window.isSecureContext === true`). Modern web browsers treat only `https://` origins and `http://localhost` / `http://127.0.0.1` as secure contexts. Plain HTTP connections over a LAN (e.g. `http://192.168.1.X:5000/mobile`) block camera access completely.
-   - **Server-Side Enforcement:** `GET /mobile` checks request context (`localhost` or `HTTPS`). When accessed over plain HTTP on a LAN IP, it returns an informational Secure Context notice explaining the HTTPS requirement for `getUserMedia`.
-   - Consequently, remote mobile streaming requires HTTPS (via an Nginx/Caddy TLS reverse proxy or secure tunnel).
-   - Mobile streaming is **disabled by default** (`MOBILE_ENABLED=false`). Set `MOBILE_ENABLED=true` in `.env` to enable it.
-   - To prevent leaking operator credentials to phone browsers, the operator generates an 8-character pairing code from an unambiguous alphabet via `POST /api/mobile/pairing_code`.
-   - The phone exchanges this code at `POST /api/mobile/exchange` for a single-purpose, scoped `session_token`.
-   - Failed exchange attempts are tracked per client IP; 5 failed attempts locks out the client IP address for 10 minutes (`{"detail": "Too many failed pairing attempts. IP address locked out for 10 minutes."}`, HTTP 429).
-   - **Shared-NAT & Proxy Behavior:** When multiple mobile devices share a public IP (behind corporate NAT, mobile carrier NAT, or an unconfigured reverse proxy), an IP lockout applies to all devices sharing that IP for the 10-minute lockout window. When the lockout expires, failed attempt counters reset to 0, so a single subsequent failed exchange will not immediately re-lock the IP. Legitimate operators should configure `TRUSTED_PROXIES` so client IPs are reliably resolved from `X-Forwarded-For`.
-   - In-band WebSocket authentication: The phone connects to `/ws/mobile_stream` (no token in the URL) and sends `{"type":"auth","session":"..."}` as its first message.
-   - Connection caps count both pending (unauthenticated) and active sockets against `MAX_MOBILE_WS_CONNECTIONS` (default: 5), synchronously registering sockets before any async dispatch and returning WebSocket close code `1013` with fixed reason `"Try again later: Mobile connection limit reached"` when capped.
-   - The session token is consumed immediately upon successful WebSocket connect to prevent socket replay attacks.
-   - Close frame reason phrases are strictly limited to fixed strings <= 123 bytes per RFC 6455. Server exceptions are logged server-side only with generic reason `"Internal server error: Frame ingestion failed"` sent to the client (code 1011).
+3. **CORS Allowlist Validation (D3):**
+   - Wildcard CORS (`*`) with credentials is removed.
+   - Allowed origins default to `http://localhost:8080`, `http://127.0.0.1:8080`, `http://localhost:5000`, `http://127.0.0.1:5000`, configurable via `CORS_ORIGINS`.
 
-4. **Network Topology & Trusted Proxies:**
-   - `DETECTION_TRUSTED_PROXIES` defaults to `""` (empty list; direct socket peer is always used).
-   - **Proxy-forwarded IPs (X-Forwarded-For) are unsupported until verified.** When `DETECTION_TRUSTED_PROXIES` is empty, incoming `X-Forwarded-For` headers are strictly ignored and client IP is resolved from the socket peer directly.
-   - **Nginx-to-Detection Path Status:** **UNVERIFIED** (Docker is unavailable on test environment).
-   - If deploying with Docker Compose on a supported Docker host, manual verification can be performed using `wget` inside the container (using `wget`, not `curl`, as Alpine Nginx includes `wget`):
-     ```bash
-     docker compose exec web wget -qO- \
-       --header="X-Operator-Token: $DETECTION_OPERATOR_TOKEN" \
-       http://host.docker.internal:5000/api/system_info
-     ```
-   - Security topology rule: Trust ONLY the exact gateway IP when configuring `DETECTION_TRUSTED_PROXIES`, never whole subnets or DNS names (to prevent DNS spoofing and cross-container IP spoofing).
-   - `X-Forwarded-For` is honored only when requests originate directly from an exact IP configured in `DETECTION_TRUSTED_PROXIES`. Untrusted peer requests ignore `X-Forwarded-For` and use the direct peer socket IP.
+4. **Credential Redaction in Stream URLs (D4):**
+   - Embedded RTSP and HTTP stream credentials (`rtsp://user:pass@host/`) are automatically scrubbed and redacted as `***` in API responses and server logs.
 
-5. **Security Error Responses Contract (`app.py` Source of Truth):**
-   - **HTTP 401 Unauthorized:**
-     - `Unauthorized: invalid or missing operator token. Provide 'X-Operator-Token' header.` (Triggered when `X-Operator-Token` header is missing, invalid, or passed via query parameter).
-     - `Invalid or expired pairing code.` (Triggered on `POST /api/mobile/exchange` when pairing code is invalid or past 300s TTL).
-   - **HTTP 413 Request Entity Too Large:**
-     - `Upload size ({declared_cl} bytes) exceeds maximum allowed limit of 5 MB.` (Triggered on declared `Content-Length` header > 5 MB).
-     - `Upload size ({file_size} bytes) exceeds maximum allowed limit of 5 MB.` (Triggered on ASGI file.size > 5 MB).
-     - `Upload size exceeds maximum allowed limit of 5 MB.` (Triggered when chunked payload stream exceeds 5 MB).
-   - **HTTP 429 Too Many Requests:**
-     - `IP temporarily locked out due to excessive failed exchange attempts. Try again in {seconds}s.` (Triggered on `POST /api/mobile/exchange` during active 10-minute IP lockout).
-     - `Too many pairing exchange requests. Please slow down.` (Triggered on `POST /api/mobile/exchange` exceeding sliding window rate limit of 10 req/min per IP).
-     - `Too many failed pairing attempts. IP address locked out for 10 minutes.` (Triggered on the 5th consecutive failed pairing exchange attempt from an IP).
+5. **Transport Limits & Buffer Protection (D7):**
+   - Upload file size is strictly capped at 5 MB (HTTP 413 Payload Too Large on overflow).
+   - Concurrent unauthenticated WebSocket handshakes are capped at 5, and total sockets are capped at 10.
+   - Transport frame size is capped at 5 MB (WebSocket close code 1009).
 
-6. **Canonical Server Launch Command:**
-   - The production server command enforcing host, port, and the 5 MB WebSocket transport message limit is:
-     ```bash
-     uvicorn app:app --host 127.0.0.1 --port 5000 --ws-max-size 5242880
-     ```
-   - The `--ws-max-size 5242880` argument sets the enforced transport frame limit at the ASGI layer.
+6. **Mobile Secure Context Enforcement & NAT Pairing (D9, OP-SHARED-LOCKOUT):**
+   - Mobile camera streaming (`/mobile`) enforces browser Secure Contexts (`HTTPS` or `localhost`).
+   - Plain HTTP access over LAN serves an informative security notice explaining that `getUserMedia` camera access requires HTTPS.
+   - Mobile authentication rate limiting is decoupled from transport IP address and keyed by session token, ensuring multiple phones behind a shared NAT router do not suffer collateral pairing lockouts.
 
-7. **Development Internet Tunnel (`start_tunnel.bat`):**
-   - `start_tunnel.bat` is strictly for **development and testing**.
-   - Running the tunnel exposes port 5000 to the public internet. Read-only endpoints (`/video_feed`, `/api/detections`, `/ws`) become publicly accessible.
-   - Requires explicit opt-in: `set ALLOW_TUNNEL=1`.
-
----
-
-## ⚖️ Model Limitations & AGPL-3.0 License Notice
-
-- **Third-Party Dependency:** This server uses [Ultralytics YOLO](https://github.com/ultralytics/ultralytics), licensed under **AGPL-3.0**. See [`NOTICE`](./NOTICE) for details.
-- **Classification Limitations:** The shipped weights (`yolo26n.pt`) are standard 80-class COCO weights. Detected items are mapped to waste taxonomy categories via heuristic config tables. Custom-trained model weights for paper, cardboard, and industrial waste will be introduced in future updates.
-
----
-
-## 💻 How to Connect to the EcoWing Website
-
-### 1. In Plain HTML
-Simply paste this image tag into your website's HTML template:
-```html
-<div class="stream-container">
-  <h3>EcoWing AI Live Detection Feed</h3>
-  <img 
-    src="http://192.168.31.44:5000/video_feed" 
-    alt="EcoWing Waste Detection Stream" 
-    style="width: 100%; max-width: 800px; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.15);"
-  />
-</div>
-```
-
-### 2. In React / Next.js
-```jsx
-export default function WasteStreamWidget() {
-  const streamUrl = "http://192.168.31.44:5000/video_feed";
-
-  return (
-    <div className="p-4 bg-gray-900 rounded-2xl shadow-xl">
-      <h2 className="text-emerald-400 font-bold mb-3">EcoWing Live Sorting Stream</h2>
-      <img 
-        src={streamUrl} 
-        alt="EcoWing Stream" 
-        className="w-full rounded-xl border border-emerald-500/20 shadow-md"
-      />
-    </div>
-  );
-}
-```
-
-### 3. Fetching Real-Time Waste Counters in JavaScript
-```javascript
-// Poll current waste counts and items every 1 second
-async function fetchEcoWingStats() {
-  try {
-    const res = await fetch("http://192.168.31.44:5000/api/detections");
-    const json = await res.json();
-    const data = json.data;
-
-    console.log(`Total Waste: ${data.total_count}`);
-    console.log(`Recyclable: ${data.recyclable_count}`);
-    console.log(`Biodegradable: ${data.biodegradable_count}`);
-    
-    // List of individual items in view
-    data.items.forEach(item => {
-      const pct = Math.round(item.confidence * 100);
-      console.log(`${item.name} (${pct}%): Recyclable=${item.recyclable}, Bio=${item.biodegradable}`);
-    });
-  } catch (err) {
-    console.error("EcoWing Server Offline:", err);
-  }
-}
-
-setInterval(fetchEcoWingStats, 1000);
-```
+7. **Vercel Demo Notice (D11):**
+   - The public Vercel frontend is an unlinked static demonstration preview.
+   - Full Detection inference requires a Python host runtime with PyTorch and OpenCV; it cannot run on static/serverless Vercel hosting.
 
 ---
 
 ## 🗂️ COCO-to-Waste Mapping Table (`config.COCO_WASTE_MAPPING`)
 
 > [!NOTE]
-> The detector uses standard 80-class COCO weights (`yolo26n.pt`). It does **NOT** detect raw materials (such as loose paper, broken glass, scrap metal, or raw plastic) directly.
-> Only recognized COCO object classes are mapped to waste categories and disposal properties using the table below (Taxonomy v1.0.0, classification method `coco_mapping`).
-> Any COCO class not present in this mapping table is strictly ignored and never reported as waste.
+> The detector uses standard 80-class COCO weights (`yolo26n.pt`). It does **NOT** detect raw materials directly. Only recognized COCO objects are resolved to waste categories (Taxonomy v1.0.0, method `coco_mapping`). Unmapped classes produce no waste items.
 
 | COCO Label | Category | Material | Recyclable | Biodegradable | Method | Model Supported | Recommended Bin |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- |
@@ -251,17 +156,22 @@ setInterval(fetchEcoWingStats, 1000);
 
 ---
 
-## 🏃 How to Run the Detection Server
+## 🏃 Run Paths & Execution Instructions
 
-In your terminal inside `detction system`:
+### Local Development Run Path
+1. Set mandatory operator token:
+   ```bash
+   export DETECTION_OPERATOR_TOKEN="your_secure_operator_token_at_least_32_chars_long_123"
+   export ECOWING_INGEST_URL="http://127.0.0.1:3000/api/drone/detection"
+   export ECOWING_DEVICE_TOKEN="your_drone_token_configured_in_ecowing"
+   ```
+2. Start the service:
+   ```bash
+   python -m uvicorn app:app --host 127.0.0.1 --port 5000
+   ```
+3. Open `http://localhost:5000` to inspect local diagnostic hub.
 
-```bash
-python run.py
-```
-Or with custom port:
-```bash
-python -m uvicorn app:app --host 0.0.0.0 --port 5000
-```
-
-Open `http://localhost:5000` or `http://192.168.31.44:5000` in any web browser to view the control center.
-
+### Docker Compose Run Path
+When deploying with EcoWing stack:
+- Detection runs as an internal service on the `ecowing_net` Docker bridge.
+- All client access routes through Nginx on port `8080`.

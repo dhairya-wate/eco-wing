@@ -831,3 +831,13 @@ def test_d15_superfluous_package_json_removed():
     """
     pkg_json = BASE_DIR / "package.json"
     assert not pkg_json.exists(), f"Superfluous package.json must not exist in Python repository: {pkg_json}"
+
+
+def test_d10_no_hardcoded_lan_ips_in_documentation():
+    """
+    D10: Asserts that hardcoded LAN IP (192.168.31.44) is completely removed from README.md and documentation.
+    """
+    readme_path = BASE_DIR / "README.md"
+    assert readme_path.exists()
+    content = readme_path.read_text(encoding="utf-8")
+    assert "192.168.31.44" not in content, "Hardcoded LAN IP 192.168.31.44 must not appear in README.md"
