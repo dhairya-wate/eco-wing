@@ -666,12 +666,9 @@ def test_network_defaults_and_localhost_binding():
     res_lan = subprocess.run([sys.executable, "-c", code_lan], env=env_lan, capture_output=True, text=True)
     assert res_lan.returncode == 0, f"ALLOW_LAN config failed: {res_lan.stderr}"
 
-    # 3. Verify start_tunnel.bat is permanently disabled
+    # 3. Verify start_tunnel.bat is removed
     tunnel_script = BASE_DIR / "start_tunnel.bat"
-    assert tunnel_script.exists()
-    content = tunnel_script.read_text(encoding="utf-8")
-    assert "PERMANENTLY DISABLED" in content
-    assert "exit /b 1" in content
+    assert not tunnel_script.exists()
 
 
 def test_mobile_secure_context_enforcement(monkeypatch):
