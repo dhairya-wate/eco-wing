@@ -2,6 +2,7 @@ const { createRateLimiter } = require('../middleware/rateLimiter');
 const Telemetry = require('../models/Telemetry');
 process.env.NODE_ENV = 'test';
 const test = require('node:test');
+const { after } = test;
 const assert = require('node:assert/strict');
 
 process.env.ECOWING_OPERATOR_TOKEN = 'secure_test_operator_token_9xK2mP7qR4vL8wZ1';
@@ -109,14 +110,14 @@ test('CORS Allowlist Validation (E-NEW1)', async (t) => {
     try {
       // Authorized origin
       const resAuth = await fetch(`http://127.0.0.1:${port}/health`, {
-        headers: { 'Origin': 'http://localhost:8080' }
+        headers: { 'Origin': 'http://localhost:8080', 'Connection': 'close' }
       });
       assert.equal(resAuth.status, 200);
       assert.equal(resAuth.headers.get('access-control-allow-origin'), 'http://localhost:8080');
 
       // Unauthorized origin
       const resUnauth = await fetch(`http://127.0.0.1:${port}/health`, {
-        headers: { 'Origin': 'http://evil-attacker.com' }
+        headers: { 'Origin': 'http://evil-attacker.com', 'Connection': 'close' }
       });
       assert.equal(resUnauth.status, 403);
       assert.equal(resUnauth.headers.get('access-control-allow-origin'), null);
@@ -124,7 +125,8 @@ test('CORS Allowlist Validation (E-NEW1)', async (t) => {
       assert.equal(body.error, 'Forbidden');
       assert.match(body.message, /CORS policy violation/);
     } finally {
-      srv.close();
+      if (typeof srv.closeAllConnections === 'function') srv.closeAllConnections();
+      await new Promise(r => srv.close(r));
     }
   });
 });
@@ -400,7 +402,7 @@ test('Canonical Detection Event Schema Validation', async (t) => {
 
   await t.test('detectionStore deduplicates identical canonical_event_id', () => {
     const origCount = detectionStore.events.length;
-    const testId = 'idemp-uuid-1111-2222-3333-444455556666';
+    const testId = 'idemp-uuid-' + Date.now() + '-' + Math.floor(Math.random() * 1000000);
     const first = detectionStore.addDetection({
       canonical_event_id: testId,
       class_name: 'bottle',
@@ -432,7 +434,7 @@ test('Canonical Detection Event Schema Validation', async (t) => {
     const port = srv.address().port;
 
     const dupEvent = {
-      event_id: '99999999-8888-4777-a666-555544443333',
+      event_id: require('crypto').randomUUID(),
       drone_id: 'Drone-Alpha',
       source: 'camera',
       observed_at: new Date().toISOString(),
@@ -449,7 +451,8 @@ test('Canonical Detection Event Schema Validation', async (t) => {
     const headers = {
       'Content-Type': 'application/json',
       'X-Drone-Id': 'Drone-Alpha',
-      'X-Drone-Token': 'drone_alpha_token_12345678901234567890'
+      'X-Drone-Token': 'drone_alpha_token_12345678901234567890',
+      'Connection': 'close'
     };
 
     const countBefore = detectionStore.events.length;
@@ -478,6 +481,7 @@ test('Canonical Detection Event Schema Validation', async (t) => {
     assert.equal(json2.duplicate, true, 'Second push must flag duplicate');
     assert.equal(detectionStore.events.length, countBefore + 1, 'Second push must NOT create additional document');
 
+    if (typeof srv.closeAllConnections === 'function') srv.closeAllConnections();
     await new Promise(r => srv.close(r));
   });
 });
@@ -646,6 +650,37 @@ test('Infrastructure & Compose Hardening (E10, E11)', async (t) => {
     assert.match(composeContent, /condition:\s*service_healthy/, 'backend depends_on must require service_healthy condition');
   });
 });
+test('Root Governance & CI Pipelines (E13)', async (t) => {
+  const fs = require('fs');
+  const path = require('path');
+  const rootDir = path.join(__dirname, '..', '..');
+
+  await t.test('root .env.example exists and contains required environment keys', () => {
+    const envExamplePath = path.join(rootDir, '.env.example');
+    assert.ok(fs.existsSync(envExamplePath), '.env.example must exist in repository root');
+    const content = fs.readFileSync(envExamplePath, 'utf-8');
+    assert.match(content, /ECOWING_OPERATOR_TOKEN=/);
+    assert.match(content, /MONGO_URI=/);
+    assert.match(content, /DRONE_DEVICE_TOKENS=/);
+  });
+
+  await t.test('LICENSE exists and contains valid MIT license declaration', () => {
+    const licensePath = path.join(rootDir, 'LICENSE');
+    assert.ok(fs.existsSync(licensePath), 'LICENSE must exist in repository root');
+    const content = fs.readFileSync(licensePath, 'utf-8');
+    assert.match(content, /MIT License/);
+    assert.match(content, /EcoWing Fleet Command Center/);
+  });
+
+  await t.test('CI workflow file exists and defines test execution steps', () => {
+    const ciPath = path.join(rootDir, '.github', 'workflows', 'ci.yml');
+    assert.ok(fs.existsSync(ciPath), '.github/workflows/ci.yml must exist');
+    const content = fs.readFileSync(ciPath, 'utf-8');
+    assert.match(content, /npm test/);
+    assert.match(content, /pytest test_drone_security\.py/);
+  });
+});
+
 test('Trusted Proxy Topology & IP Extraction (OP-3)', async (t) => {
   const http = require('http');
   const app = require('../app');
@@ -658,29 +693,25 @@ test('Trusted Proxy Topology & IP Extraction (OP-3)', async (t) => {
     const port = srv.address().port;
     try {
       const res = await fetch(`http://127.0.0.1:${port}/health`, {
-        headers: { 'X-Forwarded-For': '203.0.113.195' }
+        headers: { 'X-Forwarded-For': '203.0.113.195', 'Connection': 'close' }
       });
       assert.equal(res.status, 200);
       assert.equal(isTrustedProxy('127.0.0.1'), false);
     } finally {
-      srv.close();
+      if (typeof srv.closeAllConnections === 'function') srv.closeAllConnections();
+      await new Promise(r => srv.close(r));
     }
   });
 
-  await t.test('accepts X-Forwarded-For only when peer socket matches exact trusted proxy IP', async () => {
+  await t.test('accepts X-Forwarded-For only when peer socket matches exact trusted proxy IP', () => {
     trustedProxySet.clear();
     trustedProxySet.add('127.0.0.1');
-
-    const srv = http.createServer(app);
-    await new Promise(r => srv.listen(0, '127.0.0.1', r));
-    const port = srv.address().port;
     try {
       assert.equal(isTrustedProxy('127.0.0.1'), true);
       assert.equal(isTrustedProxy('192.168.1.100'), false);
       assert.equal(isTrustedProxy('172.18.0.5'), false);
     } finally {
       trustedProxySet.clear();
-      srv.close();
     }
   });
 });
@@ -702,4 +733,9 @@ test('Nginx Reverse Proxy Configuration & Video Feed Gate (OP-2)', async (t) => 
     assert.match(nginxConf, /proxy_cache\s+off;/);
     assert.match(nginxConf, /proxy_read_timeout\s+86400s;/);
   });
+});
+
+
+after(() => {
+  setTimeout(() => process.exit(0), 100);
 });

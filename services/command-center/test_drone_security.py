@@ -1568,3 +1568,29 @@ def test_op2_nginx_reverse_proxy_topology_and_video_gate():
     assert "proxy_buffering off;" in conf
     assert "proxy_cache off;" in conf
     assert "proxy_read_timeout 86400s;" in conf
+
+
+def test_e13_governance_env_example_license_and_ci_workflow():
+    """
+    E13: Verifies that root .env.example, LICENSE, and GitHub Actions CI workflow exist and are valid.
+    """
+    root_env = os.path.join(ECOWING_DIR, ".env.example")
+    assert os.path.isfile(root_env), "Root .env.example must exist"
+    with open(root_env, "r", encoding="utf-8") as f:
+        env_content = f.read()
+    assert "ECOWING_OPERATOR_TOKEN=" in env_content
+    assert "MONGO_URI=" in env_content
+    assert "DRONE_DEVICE_TOKENS=" in env_content
+
+    license_path = os.path.join(ECOWING_DIR, "LICENSE")
+    assert os.path.isfile(license_path), "Root LICENSE must exist"
+    with open(license_path, "r", encoding="utf-8") as f:
+        lic_content = f.read()
+    assert "MIT License" in lic_content
+
+    ci_workflow = os.path.join(ECOWING_DIR, ".github", "workflows", "ci.yml")
+    assert os.path.isfile(ci_workflow), ".github/workflows/ci.yml must exist"
+    with open(ci_workflow, "r", encoding="utf-8") as f:
+        ci_content = f.read()
+    assert "npm test" in ci_content
+    assert "pytest test_drone_security.py" in ci_content
