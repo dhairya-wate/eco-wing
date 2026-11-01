@@ -1,0 +1,826 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>EcoWing Mobile AI Camera Broadcaster</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;700;800&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+  
+  <!-- PeerJS for Direct WebRTC Live Broadcast to EcoWing Website -->
+  <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+  <!-- In-Browser Real-Time AI Waste Detection -->
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.20.0/dist/tf.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.3/dist/coco-ssd.min.js"></script>
+
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+
+    body {
+      background-color: #0b0f14;
+      color: #f0f6fc;
+      font-family: 'Plus Jakarta Sans', sans-serif;
+      overflow: hidden;
+      height: 100vh;
+      width: 100vw;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .viewport {
+      position: relative;
+      flex: 1;
+      width: 100%;
+      height: 100%;
+      background: #000;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+    }
+
+    /* Video & Canvas Elements */
+    #camera-video {
+      display: none;
+    }
+
+    #stream-canvas {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+    }
+
+    /* Top HUD */
+    .top-bar {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      padding: 16px 20px;
+      background: linear-gradient(180deg, rgba(0,0,0,0.85) 0%, rgba(0,0,0,0) 100%);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      z-index: 10;
+    }
+
+    .brand-title {
+      font-size: 16px;
+      font-weight: 800;
+      letter-spacing: -0.5px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .brand-title span {
+      color: #10b981;
+    }
+
+    .status-pill {
+      font-size: 11px;
+      font-weight: 700;
+      padding: 5px 12px;
+      border-radius: 20px;
+      background: rgba(16, 185, 129, 0.2);
+      color: #10b981;
+      border: 1px solid rgba(16, 185, 129, 0.4);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      background: #10b981;
+      border-radius: 50%;
+      animation: pulse 1.5s infinite;
+    }
+
+    @keyframes pulse {
+      0% { opacity: 0.4; }
+      50% { opacity: 1; }
+      100% { opacity: 0.4; }
+    }
+
+    /* Live Waste Banner */
+    .detection-banner {
+      position: absolute;
+      bottom: 115px;
+      left: 16px;
+      right: 16px;
+      background: rgba(22, 27, 34, 0.92);
+      backdrop-filter: blur(10px);
+      border: 1px solid #30363d;
+      border-radius: 14px;
+      padding: 12px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+      z-index: 10;
+    }
+
+    .banner-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .item-name {
+      font-weight: 800;
+      font-size: 15px;
+      color: #f0f6fc;
+    }
+
+    .badge-tags {
+      display: flex;
+      gap: 6px;
+    }
+
+    .mini-tag {
+      font-size: 10px;
+      font-weight: 700;
+      padding: 3px 8px;
+      border-radius: 6px;
+      text-transform: uppercase;
+    }
+
+    .tag-rec-yes { background: rgba(16, 185, 129, 0.25); color: #10b981; }
+    .tag-rec-no { background: rgba(239, 68, 68, 0.25); color: #ef4444; }
+    .tag-bio-yes { background: rgba(52, 211, 153, 0.25); color: #34d399; }
+    .tag-bio-no { background: rgba(148, 163, 184, 0.25); color: #94a3b8; }
+
+    .bin-info {
+      font-size: 12px;
+      color: #8b949e;
+    }
+
+    /* Bottom Control Bar */
+    .bottom-bar {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      padding: 20px 24px 30px;
+      background: linear-gradient(0deg, rgba(0,0,0,0.95) 0%, rgba(0,0,0,0.5) 70%, rgba(0,0,0,0) 100%);
+      display: flex;
+      justify-content: space-around;
+      align-items: center;
+      z-index: 10;
+    }
+
+    .btn-circle {
+      width: 52px;
+      height: 52px;
+      border-radius: 50%;
+      background: rgba(255, 255, 255, 0.15);
+      border: 1px solid rgba(255, 255, 255, 0.25);
+      color: #fff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      backdrop-filter: blur(8px);
+      transition: transform 0.15s, background 0.2s;
+    }
+
+    .btn-circle:active {
+      transform: scale(0.92);
+      background: rgba(16, 185, 129, 0.4);
+    }
+
+    .btn-circle svg {
+      width: 24px;
+      height: 24px;
+    }
+
+    .btn-stream {
+      width: 70px;
+      height: 70px;
+      background: #10b981;
+      border: 3px solid #fff;
+      box-shadow: 0 0 20px rgba(16, 185, 129, 0.6);
+    }
+
+    .btn-stream.streaming {
+      background: #ef4444;
+      box-shadow: 0 0 20px rgba(239, 68, 68, 0.6);
+    }
+
+    /* AMOLED Closed Screen / Stealth Blackout Overlay */
+    .screen-off-overlay {
+      position: fixed;
+      inset: 0;
+      background-color: #000000;
+      z-index: 9999;
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      touch-action: none;
+    }
+
+    .screen-off-overlay.active {
+      display: flex;
+    }
+
+    .screen-off-hint {
+      color: rgba(255, 255, 255, 0.2);
+      font-size: 13px;
+      font-weight: 600;
+      text-align: center;
+      pointer-events: none;
+      animation: fadeOutHint 4s forwards;
+    }
+
+    @keyframes fadeOutHint {
+      0% { opacity: 0.8; }
+      70% { opacity: 0.8; }
+      100% { opacity: 0; }
+    }
+
+    /* Splash / Start Screen */
+    .splash-screen {
+      position: fixed;
+      inset: 0;
+      background: #0b0f14;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 30px;
+      text-align: center;
+      z-index: 100;
+      gap: 18px;
+    }
+
+    .splash-icon {
+      font-size: 56px;
+    }
+
+    .splash-title {
+      font-size: 22px;
+      font-weight: 800;
+    }
+
+    .splash-text {
+      font-size: 14px;
+      color: #8b949e;
+      line-height: 1.5;
+    }
+
+    .btn-start {
+      background: #10b981;
+      color: #fff;
+      border: none;
+      padding: 16px 36px;
+      border-radius: 30px;
+      font-size: 16px;
+      font-weight: 700;
+      cursor: pointer;
+      box-shadow: 0 6px 20px rgba(16, 185, 129, 0.4);
+      margin-top: 10px;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Permission Splash -->
+  <div class="splash-screen" id="splash-screen">
+    <div class="splash-icon">🌱</div>
+    <h2 class="splash-title">EcoWing Phone Streamer</h2>
+    <p class="splash-text">
+      Connect your phone camera to the EcoWing Detection System. Enter the 8-character pairing code generated by the operator console.
+    </p>
+    <div style="margin: 14px 0; width: 100%; max-width: 320px;">
+      <input type="text" id="input-pairing-code" placeholder="8-CHAR PAIRING CODE" maxlength="8" autocomplete="off" autocorrect="off" autocapitalize="characters" style="width: 100%; padding: 12px; font-size: 16px; font-weight: 700; font-family: 'JetBrains Mono', monospace; text-transform: uppercase; text-align: center; border-radius: 8px; border: 1px solid #334155; background: #0f172a; color: #38bdf8; letter-spacing: 2px;" />
+      <div id="pairing-err-msg" style="color: #ef4444; font-size: 12px; margin-top: 8px; min-height: 18px;"></div>
+    </div>
+    <button class="btn-start" id="btn-start-camera">Pair &amp; Connect Camera</button>
+  </div>
+
+  <!-- AMOLED Screen Off / Blackout Layer -->
+  <div class="screen-off-overlay" id="screen-off-layer">
+    <div class="screen-off-hint" id="screen-off-hint">
+      🔒 Screen-Off AMOLED Mode Active<br>
+      Broadcasting live to EcoWing<br>
+      <small style="font-size: 11px; opacity: 0.7;">(Double-tap anywhere to wake)</small>
+    </div>
+  </div>
+
+  <!-- Main Viewport -->
+  <div class="viewport">
+    <video id="camera-video" autoplay playsinline muted></video>
+    <canvas id="stream-canvas"></canvas>
+
+    <!-- Top Bar -->
+    <div class="top-bar">
+      <div class="brand-title">
+        EcoWing <span>Broadcaster</span>
+      </div>
+      <div class="status-pill" id="status-pill">
+        <span class="status-dot"></span>
+        <span id="status-text">INITIALIZING...</span>
+      </div>
+    </div>
+
+    <!-- Live Waste Result Banner -->
+    <div class="detection-banner" id="detection-banner">
+      <div class="banner-header">
+        <span class="item-name" id="banner-name">AI Waste Scanner Active</span>
+        <div class="badge-tags" id="banner-tags"></div>
+      </div>
+      <div class="bin-info" id="banner-bin">Aim camera at bottle, can, paper, cardboard, or food scrap</div>
+    </div>
+
+    <!-- Bottom Controls -->
+    <div class="bottom-bar">
+      <!-- Camera Flip -->
+      <button class="btn-circle" id="btn-flip" title="Switch Camera">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M20 10c0-4.418-3.582-8-8-8s-8 3.582-8 8c0 1.5.4 2.9 1.1 4.1L3 17h5v-5l-1.9 1.9C5.4 12.8 5 11.5 5 10c0-3.866 3.134-7 7-7s7 3.134 7 7-3.134 7-7 7v2c4.418 0 8-3.582 8-8Z"/>
+        </svg>
+      </button>
+
+      <!-- AMOLED Screen Off Mode -->
+      <button class="btn-circle" id="btn-screen-off" title="Turn Screen Pitch Black">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/>
+        </svg>
+      </button>
+
+      <!-- Stream Toggle -->
+      <button class="btn-circle btn-stream" id="btn-stream" title="Pause/Resume Stream">
+        <svg id="stream-icon-stop" viewBox="0 0 24 24" fill="currentColor" style="width: 28px; height: 28px;">
+          <rect x="6" y="6" width="12" height="12" rx="2" />
+        </svg>
+        <svg id="stream-icon-play" viewBox="0 0 24 24" fill="currentColor" style="display:none; width: 28px; height: 28px;">
+          <polygon points="5,3 19,12 5,21" />
+        </svg>
+      </button>
+
+      <!-- Torch / Flashlight -->
+      <button class="btn-circle" id="btn-torch" title="Toggle Flashlight">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z"/>
+        </svg>
+      </button>
+    </div>
+  </div>
+
+  <script>
+    const video = document.getElementById('camera-video');
+    const canvas = document.getElementById('stream-canvas');
+    const ctx = canvas.getContext('2d');
+    const splash = document.getElementById('splash-screen');
+    const btnStart = document.getElementById('btn-start-camera');
+    const btnFlip = document.getElementById('btn-flip');
+    const btnStream = document.getElementById('btn-stream');
+    const btnTorch = document.getElementById('btn-torch');
+    const btnScreenOff = document.getElementById('btn-screen-off');
+    const screenOffLayer = document.getElementById('screen-off-layer');
+    const screenOffHint = document.getElementById('screen-off-hint');
+    const statusText = document.getElementById('status-text');
+    const statusPill = document.getElementById('status-pill');
+    const bannerName = document.getElementById('banner-name');
+    const bannerTags = document.getElementById('banner-tags');
+    const bannerBin = document.getElementById('banner-bin');
+    const iconPlay = document.getElementById('stream-icon-play');
+    const iconStop = document.getElementById('stream-icon-stop');
+
+    let currentStream = null;
+    let facingMode = 'environment';
+    let isBroadcasting = true;
+    let track = null;
+    let torchOn = false;
+    let lastTap = 0;
+    let aiModel = null;
+    let peer = null;
+    let canvasMediaStream = null;
+
+    // EcoWing target website endpoint
+    const ECOWING_TARGET = window.location.origin;
+
+    // Waste Taxonomy Mapping for AI
+    const WASTE_MAPPING = {
+      "bottle": { name: "Plastic / Glass Bottle", category: "Bottle", recyclable: true, biodegradable: false, bin: "Blue Bin (Plastics/Glass)", color: "#06b6d4" },
+      "wine glass": { name: "Glassware / Glass", category: "Glass", recyclable: true, biodegradable: false, bin: "Cyan Bin (Glass)", color: "#00e5ff" },
+      "cup": { name: "Beverage Can / Cup", category: "Can / Cup", recyclable: true, biodegradable: false, bin: "Yellow Bin (Metals/Paper)", color: "#f59e0b" },
+      "book": { name: "Paper / Cardboard", category: "Paper", recyclable: true, biodegradable: true, bin: "Blue Bin (Paper/Dry)", color: "#3b82f6" },
+      "banana": { name: "Banana Peel / Food Scrap", category: "Organic Waste", recyclable: false, biodegradable: true, bin: "Green Bin (Compost)", color: "#10b981" },
+      "apple": { name: "Apple Scrap / Food Waste", category: "Organic Waste", recyclable: false, biodegradable: true, bin: "Green Bin (Compost)", color: "#10b981" },
+      "orange": { name: "Orange Peel / Citrus", category: "Organic Waste", recyclable: false, biodegradable: true, bin: "Green Bin (Compost)", color: "#10b981" },
+      "sandwich": { name: "Food Waste Scrap", category: "Organic Waste", recyclable: false, biodegradable: true, bin: "Green Bin (Compost)", color: "#10b981" },
+      "pizza": { name: "Food Residue / Scrap", category: "Organic Waste", recyclable: false, biodegradable: true, bin: "Green Bin (Compost)", color: "#10b981" },
+      "donut": { name: "Food Scrap", category: "Organic Waste", recyclable: false, biodegradable: true, bin: "Green Bin (Compost)", color: "#10b981" },
+      "cake": { name: "Food Scrap", category: "Organic Waste", recyclable: false, biodegradable: true, bin: "Green Bin (Compost)", color: "#10b981" },
+      "carrot": { name: "Vegetable Peel", category: "Organic Waste", recyclable: false, biodegradable: true, bin: "Green Bin (Compost)", color: "#10b981" },
+      "broccoli": { name: "Vegetable Scrap", category: "Organic Waste", recyclable: false, biodegradable: true, bin: "Green Bin (Compost)", color: "#10b981" },
+      "bowl": { name: "Plastic / Ceramic Bowl", category: "Plastic / Ceramic", recyclable: true, biodegradable: false, bin: "Recyclable Bin", color: "#64748b" },
+      "fork": { name: "Disposable Cutlery", category: "Plastic Cutlery", recyclable: true, biodegradable: false, bin: "Recyclables", color: "#f59e0b" },
+      "knife": { name: "Disposable Cutlery", category: "Plastic Cutlery", recyclable: true, biodegradable: false, bin: "Recyclables", color: "#f59e0b" },
+      "spoon": { name: "Disposable Cutlery", category: "Plastic Cutlery", recyclable: true, biodegradable: false, bin: "Recyclables", color: "#f59e0b" }
+    };
+
+    function resolveWaste(cls) {
+      if (!cls) return null;
+      const c = cls.toLowerCase().trim();
+      if (WASTE_MAPPING[c]) return WASTE_MAPPING[c];
+      for (const k in WASTE_MAPPING) {
+        if (c.includes(k) || k.includes(c)) return WASTE_MAPPING[k];
+      }
+      return null;
+    }
+
+    // WakeLock keeps phone CPU awake
+    let wakeLock = null;
+    async function requestWakeLock() {
+      try {
+        if ('wakeLock' in navigator) {
+          wakeLock = await navigator.wakeLock.request('screen');
+        }
+      } catch (err) {}
+    }
+
+    let mobileWs = null;
+    let mobileWsAuthenticated = false;
+
+    // Check URL parameters for pre-filled pairing code (?code=...)
+    const urlParams = new URLSearchParams(window.location.search);
+    const prefillCode = urlParams.get('code');
+    const inputPairingCode = document.getElementById('input-pairing-code');
+    const pairingErrMsg = document.getElementById('pairing-err-msg');
+    if (prefillCode && inputPairingCode) {
+      inputPairingCode.value = prefillCode.trim().toUpperCase();
+    }
+
+    btnStart.addEventListener('click', async () => {
+      const code = (inputPairingCode ? inputPairingCode.value.trim().toUpperCase() : "");
+      if (!code || code.length !== 8) {
+        if (pairingErrMsg) pairingErrMsg.textContent = "Please enter an 8-character pairing code.";
+        return;
+      }
+      if (pairingErrMsg) pairingErrMsg.textContent = "Exchanging code...";
+
+      try {
+        const res = await fetch("/api/mobile/exchange", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ code: code })
+        });
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          if (pairingErrMsg) pairingErrMsg.textContent = errData.detail || "Invalid or expired pairing code.";
+          return;
+        }
+        const data = await res.json();
+        const sessionToken = data.session_token;
+
+        // Connect WebSocket with in-band authentication (no token in URL)
+        const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
+        const wsUrl = `${proto}//${window.location.host}/ws/mobile_stream`;
+        mobileWs = new WebSocket(wsUrl);
+
+        mobileWs.onopen = () => {
+          // Send first auth message
+          mobileWs.send(JSON.stringify({ type: "auth", session: sessionToken }));
+        };
+
+        mobileWs.onmessage = (event) => {
+          try {
+            const msg = JSON.parse(event.data);
+            if (msg.type === "auth_ok") {
+              mobileWsAuthenticated = true;
+              statusText.textContent = "STREAM CONNECTED";
+              statusPill.style.borderColor = "#10b981";
+            }
+          } catch (e) {}
+        };
+
+        mobileWs.onclose = (event) => {
+          mobileWsAuthenticated = false;
+          statusText.textContent = "OFFLINE (DISCONNECTED)";
+          statusPill.style.borderColor = "#ef4444";
+        };
+
+        splash.style.display = 'none';
+        await startCamera();
+        loadAI();
+        requestWakeLock();
+
+        // Stream canvas frames over WebSocket to Detection system
+        setInterval(() => {
+          if (!mobileWs || !mobileWsAuthenticated || !isBroadcasting || canvas.width === 0) return;
+          canvas.toBlob((blob) => {
+            if (blob && mobileWs && mobileWs.readyState === WebSocket.OPEN) {
+              blob.arrayBuffer().then((buffer) => {
+                mobileWs.send(buffer);
+              });
+            }
+          }, "image/jpeg", 0.65);
+        }, 80);
+
+      } catch (err) {
+        if (pairingErrMsg) pairingErrMsg.textContent = "Connection error: " + err.message;
+      }
+    });
+
+    async function startCamera() {
+      if (currentStream) {
+        currentStream.getTracks().forEach(t => t.stop());
+      }
+
+      const constraints = {
+        video: {
+          facingMode: { ideal: facingMode },
+          width: { ideal: 640 },
+          height: { ideal: 480 },
+          frameRate: { ideal: 24 }
+        },
+        audio: false
+      };
+
+      try {
+        currentStream = await navigator.mediaDevices.getUserMedia(constraints);
+        video.srcObject = currentStream;
+        await video.play();
+        track = currentStream.getVideoTracks()[0];
+        
+        // Create canvas stream for WebRTC broadcast
+        canvas.width = 640;
+        canvas.height = 480;
+        if (canvas.captureStream) {
+          canvasMediaStream = canvas.captureStream(25);
+        }
+
+        requestAnimationFrame(processFrame);
+      } catch (err) {
+        alert("Camera permission denied: " + err.message);
+      }
+    }
+
+    async function loadAI() {
+      try {
+        statusText.textContent = "LOADING AI...";
+        aiModel = await cocoSsd.load({ base: "mobilenet_v2" });
+        statusText.textContent = "BROADCASTING LIVE";
+      } catch (e) {
+        statusText.textContent = "BROADCASTING LIVE";
+      }
+    }
+
+    // Direct WebRTC Broadcaster to EcoWing Website
+    let activeDataConns = [];
+    let lastDetectionBroadcastTime = 0;
+
+    function initPeerBroadcaster() {
+      // Connect to public PeerJS cloud with fixed broadcaster ID
+      peer = new Peer('ecowing-live-drone', {
+        debug: 1,
+        config: {
+          iceServers: [
+            { urls: 'stun:stun.l.google.com:19302' },
+            { urls: 'stun:global.stun.twilio.com:3478' }
+          ]
+        }
+      });
+
+      peer.on('open', (id) => {
+        console.log('Peer broadcaster ready with ID:', id);
+        statusText.textContent = "BROADCASTING LIVE";
+        statusPill.style.borderColor = "#10b981";
+      });
+
+      // When EcoWing website connects for video stream
+      peer.on('call', (call) => {
+        console.log('EcoWing website connected! Answering with live AI stream...');
+        if (canvasMediaStream) {
+          call.answer(canvasMediaStream);
+        }
+      });
+
+      // When EcoWing website connects data channel for detections/telemetry
+      peer.on('connection', (conn) => {
+        console.log('EcoWing data channel connected!');
+        activeDataConns.push(conn);
+        conn.on('close', () => {
+          activeDataConns = activeDataConns.filter(c => c !== conn);
+        });
+      });
+
+      peer.on('error', (err) => {
+        console.warn('Peer status:', err.type);
+        // If ID is in use, retry after random delay
+        if (err.type === 'unavailable-id') {
+          setTimeout(initPeerBroadcaster, 4000);
+        }
+      });
+    }
+
+    // Backup HTTP frame broadcaster (posts to EcoWing backend)
+    function startHttpRelay() {
+      setInterval(() => {
+        if (!isBroadcasting || canvas.width === 0) return;
+        const dataUrl = canvas.toDataURL("image/jpeg", 0.68);
+        fetch(`${ECOWING_TARGET}/api/drone/stream-frame`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ frame: dataUrl })
+        }).catch(() => {});
+      }, 70);
+    }
+
+    // Frame processing: Draws camera + AI waste bounding boxes
+    async function processFrame() {
+      if (video.readyState === 4) {
+        const w = video.videoWidth || 640;
+        const h = video.videoHeight || 480;
+        if (canvas.width !== w || canvas.height !== h) {
+          canvas.width = w;
+          canvas.height = h;
+        }
+
+        ctx.drawImage(video, 0, 0, w, h);
+
+        if (aiModel) {
+          try {
+            const predictions = await aiModel.detect(video);
+            let topItem = null;
+
+            predictions.forEach(pred => {
+              const item = resolveWaste(pred.class);
+              if (!item || pred.score < 0.35) return;
+
+              const [bx, by, bw, bh] = pred.bbox;
+              const conf = Math.round(pred.score * 100);
+
+              if (!topItem || pred.score > topItem.score) {
+                topItem = { item, conf };
+              }
+
+              // Draw high-visibility box
+              ctx.strokeStyle = item.color;
+              ctx.lineWidth = 3;
+              ctx.strokeRect(bx, by, bw, bh);
+
+              // Corner accents
+              const clen = Math.min(18, bw / 4, bh / 4);
+              ctx.lineWidth = 5;
+              ctx.beginPath();
+              ctx.moveTo(bx, by + clen); ctx.lineTo(bx, by); ctx.lineTo(bx + clen, by);
+              ctx.moveTo(bx + bw - clen, by); ctx.lineTo(bx + bw, by); ctx.lineTo(bx + bw, by + clen);
+              ctx.moveTo(bx, by + bh - clen); ctx.lineTo(bx, by + bh); ctx.lineTo(bx + clen, by + bh);
+              ctx.moveTo(bx + bw - clen, by + bh); ctx.lineTo(bx + bw, by + bh); ctx.lineTo(bx + bw, by + bh - clen);
+              ctx.stroke();
+
+              // Badge
+              ctx.fillStyle = item.color;
+              const label = `${item.name} ${conf}%`;
+              ctx.font = "bold 13px Plus Jakarta Sans, sans-serif";
+              const textWidth = ctx.measureText(label).width;
+              const badgeY = Math.max(by - 26, 6);
+              ctx.fillRect(bx, badgeY, Math.max(textWidth + 14, 180), 22);
+
+              ctx.fillStyle = "#000000";
+              ctx.fillText(label, bx + 6, badgeY + 16);
+
+              // Sub pills
+              const subY = badgeY + 24;
+              ctx.fillStyle = item.recyclable ? "#10b981" : "#ef4444";
+              ctx.fillRect(bx, subY, 82, 16);
+              ctx.fillStyle = "#ffffff";
+              ctx.font = "bold 10px Plus Jakarta Sans, sans-serif";
+              ctx.fillText(item.recyclable ? "REC: YES" : "REC: NO", bx + 6, subY + 12);
+
+              ctx.fillStyle = item.biodegradable ? "#34d399" : "#64748b";
+              ctx.fillRect(bx + 86, subY, 82, 16);
+              ctx.fillStyle = "#ffffff";
+              ctx.fillText(item.biodegradable ? "BIO: YES" : "BIO: NO", bx + 92, subY + 12);
+            });
+
+            // Update on-screen banner & broadcast detection
+            if (topItem) {
+              bannerName.textContent = `${topItem.item.name} (${topItem.conf}%)`;
+              const recClass = topItem.item.recyclable ? 'tag-rec-yes' : 'tag-rec-no';
+              const recText = topItem.item.recyclable ? 'Recyclable: YES' : 'Non-Recyclable';
+              const bioClass = topItem.item.biodegradable ? 'tag-bio-yes' : 'tag-bio-no';
+              const bioText = topItem.item.biodegradable ? 'Bio: YES' : 'Non-Bio';
+
+              bannerTags.innerHTML = `
+                <span class="mini-tag ${recClass}">${recText}</span>
+                <span class="mini-tag ${bioClass}">${bioText}</span>
+              `;
+              bannerBin.textContent = `Disposal: ${topItem.item.bin}`;
+
+              // Send live detection to EcoWing database (throttled to 1/sec)
+              const now = Date.now();
+              if (now - lastDetectionBroadcastTime > 1000) {
+                lastDetectionBroadcastTime = now;
+                const matType = topItem.item.recyclable ? 'Recyclable' : (topItem.item.biodegradable ? 'Biodegradable' : 'Non-Recyclable');
+                const confNormalized = typeof topItem.conf === 'number' ? (topItem.conf <= 1.0 ? Number(topItem.conf.toFixed(2)) : Number((topItem.conf / 100).toFixed(2))) : 0.0;
+                const detEvent = {
+                  type: 'detection',
+                  item: topItem.item.name,
+                  material: matType,
+                  material_type: matType,
+                  confidence: confNormalized,
+                  recyclable: topItem.item.recyclable,
+                  biodegradable: topItem.item.biodegradable,
+                  bin: topItem.item.bin
+                };
+
+                // Over WebRTC data channel
+                activeDataConns.forEach(c => {
+                  try { if (c.open) c.send(detEvent); } catch(e){}
+                });
+
+                // Over HTTP REST to save directly into EcoWing database
+                fetch(`${ECOWING_TARGET}/api/drone/detection`, {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    drone_id: 'Phone Camera',
+                    class_name: topItem.item.name,
+                    material_type: matType,
+                    confidence: confNormalized,
+                    center: [320, 240]
+                  })
+                }).catch(() => {});
+              }
+            } else {
+              bannerName.textContent = "Scanning for Waste...";
+              bannerTags.innerHTML = "";
+              bannerBin.textContent = "Aim at bottles, cans, paper, cardboard, or food scrap";
+            }
+          } catch (e) {}
+        }
+      }
+      requestAnimationFrame(processFrame);
+    }
+
+    // Switch between Front & Rear Camera
+    btnFlip.addEventListener('click', async () => {
+      facingMode = facingMode === 'environment' ? 'user' : 'environment';
+      await startCamera();
+    });
+
+    // Toggle Torch
+    btnTorch.addEventListener('click', async () => {
+      if (track && track.getCapabilities && track.getCapabilities().torch) {
+        torchOn = !torchOn;
+        try {
+          await track.applyConstraints({ advanced: [{ torch: torchOn }] });
+          btnTorch.style.color = torchOn ? '#f59e0b' : '#fff';
+        } catch (e) {}
+      } else {
+        alert("Torch is not supported on this camera/browser.");
+      }
+    });
+
+    // AMOLED Screen Off Mode
+    btnScreenOff.addEventListener('click', () => {
+      screenOffLayer.classList.add('active');
+      screenOffHint.style.animation = 'none';
+      screenOffHint.offsetHeight;
+      screenOffHint.style.animation = 'fadeOutHint 4s forwards';
+    });
+
+    // Double-tap to wake
+    screenOffLayer.addEventListener('click', () => {
+      const now = Date.now();
+      if (now - lastTap < 400) {
+        screenOffLayer.classList.remove('active');
+      } else {
+        lastTap = now;
+      }
+    });
+
+    // Pause/Resume Stream
+    btnStream.addEventListener('click', () => {
+      isBroadcasting = !isBroadcasting;
+      if (isBroadcasting) {
+        btnStream.classList.add('streaming');
+        iconPlay.style.display = 'none';
+        iconStop.style.display = 'block';
+        statusText.textContent = "BROADCASTING LIVE";
+      } else {
+        btnStream.classList.remove('streaming');
+        iconPlay.style.display = 'block';
+        iconStop.style.display = 'none';
+        statusText.textContent = "PAUSED";
+      }
+    });
+  </script>
+</body>
+</html>

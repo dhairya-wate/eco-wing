@@ -1,0 +1,14 @@
+EcoWing Detection System
+Notice of Third-Party Dependencies and Licensing
+
+1. Ultralytics YOLO:
+   This software incorporates and uses the Ultralytics YOLO software library (https://github.com/ultralytics/ultralytics).
+   Ultralytics YOLO is distributed under the GNU Affero General Public License v3.0 (AGPL-3.0).
+   The use of this dependency may require open-source distribution under the AGPL-3.0 terms
+   unless an alternative commercial license is obtained from Ultralytics Inc.
+
+2. Model Weights:
+   The included weights file (yolo26n.pt) is a standard 80-class COCO pretrained model.
+   Predictions map COCO classes (e.g., bottle, cup, banana) to waste taxonomy categories
+   via heuristic configuration mapping.
+
