@@ -38,8 +38,10 @@ EcoWing/
 - **LAN Drone Target Protocol Restriction:** Target URLs are restricted to unencrypted HTTP (`http://`). HTTPS targets are rejected because internal/LAN IP addresses do not have publicly-trusted TLS certificates, avoiding TLS handshake failures and MITM vulnerabilities.
 - **E1 Drone & Camera Command Sanitization:** Drone commands are strictly restricted to `start`, `hold`, `rth`, `land`. Camera commands are restricted to `photo`, `record`, `zoom`, `track` with strict type and numeric range checks (e.g. zoom: 1.0 to 10.0). `drone_id` identifiers are enforced to alphanumeric with hyphens/underscores (max 64 chars).
 - **E2 Telemetry Bounds Validation:** Ingested drone telemetry (`POST /api/drone/telemetry`) strictly validates numeric bounds for coordinates (latitude [-90, 90], longitude [-180, 180]), battery [0, 100]%, altitude [-100, 10000]m, speed [0, 100]m/s, and heading [0, 360]deg. Malformed or out-of-bounds telemetry is rejected with HTTP 400.
-- **E4/E5 Network Exposure Hardening:** In `docker-compose.yml`, host port mappings for `27017` and `3000` have been removed. Root MongoDB credentials and operator tokens are required from environment variables with no default (`${MONGO_INITDB_ROOT_USERNAME:?required}`, `${MONGO_INITDB_ROOT_PASSWORD:?required}`, `${MONGO_URI:?required}`, `${ECOWING_OPERATOR_TOKEN:?required}`).
-- **Nginx-to-Detection Path Status:** **UNVERIFIED** (Docker is unavailable on test environment). If deploying on a Docker host, verify using `wget`:
+- **E4/E5 Network Exposure Hardening:** In `docker-compose.yml`, host port mappings for `27017` and `3000` have been removed. Root MongoDB credentials and operator tokens are required from environment variables with no default (`${MONGO_INITDB_ROOT_USERNAME:?required}`, `${MONGO_INITDB_ROOT_PASSWORD:?required}`, `${MONGO_URI:?required}`, `${ECOWING_OPERATOR_TOKEN:?required}`). Services are named `web` (nginx), `backend` (Node), and `mongodb` (Mongo 7), with `extra_hosts: - "host.docker.internal:host-gateway"` configured for `web` and `backend`.
+- **E-NEW1 CORS Allowlist & Socket.IO Drone Auth:** Express and Socket.IO connections are strictly restricted to configured browser origins (`http://localhost:8080`, `http://127.0.0.1:8080`, `http://localhost:3000`, `http://127.0.0.1:3000` or `CORS_ORIGINS` env). Socket.IO drone events (`register_drone`, `drone:telemetry`, `drone:detection`, `drone:frame`) require per-drone device token verification.
+- **Operator-Auth Gated Video Stream:** The `/video_feed` proxy route in Nginx and backend is gated behind operator authentication (`X-Operator-Token` header required, returns HTTP 401 when absent or invalid), with `proxy_buffering off`, `proxy_cache off`, and `proxy_read_timeout 86400s`.
+- **Nginx-to-Detection Path Status:** **UNVERIFIED** (Docker is unavailable on test environment). If deploying on a Docker host, verify using `wget` from the `web` container:
   ```bash
   docker compose exec web wget -qO- --header="X-Operator-Token: $DETECTION_OPERATOR_TOKEN" http://host.docker.internal:5000/api/system_info
   ```
@@ -67,16 +69,39 @@ docker compose up -d --build
 
 ---
 
-## 3. Database Configuration (MongoDB Atlas or Local)
+## 3. Database Configuration & Credential Requirements
 
 In `backend/.env`, configure your environment:
 ```env
 PORT=3000
-MONGO_URI=mongodb+srv://<username>:<password>@<cluster-url>/ecowing?retryWrites=true&w=majority
+MONGO_INITDB_ROOT_USERNAME=ecowing_admin
+MONGO_INITDB_ROOT_PASSWORD=replace-with-a-secure-database-password
+MONGO_URI=mongodb://ecowing_admin:replace-with-a-secure-database-password@mongodb:27017/ecowing?authSource=admin
 ECOWING_OPERATOR_TOKEN=replace_with_min_32_chars_token
 DRONE_DEVICE_TOKENS={"Drone-01":"drone_secret_token_alpha_1234567890"}
-DRONE_TARGET_ALLOWLIST=192.0.2.10
+DRONE_TARGET_ALLOWLIST=
+CORS_ORIGINS=http://localhost:8080,http://127.0.0.1:8080
 ```
+
+### MongoDB Credential Enforcement & Startup Validation
+EcoWing enforces database authentication. On application startup, `backend/app.js` runs `validateMongoUriConfig(uri)`:
+- `MONGO_URI` is strictly required and must contain user credentials in the format `mongodb://user:password@host...` or `mongodb+srv://user:password@cluster...`.
+- If credentials are missing or the URI is empty, the backend logs a fatal configuration error and terminates immediately.
+
+### MongoDB Docker First-Start Behavior & Existing Volume Migration
+- **First-Start Behavior:** The `MONGO_INITDB_ROOT_USERNAME` and `MONGO_INITDB_ROOT_PASSWORD` variables in `docker-compose.yml` are evaluated by MongoDB's official image initialization script **only** on initial volume creation when `/data/db` is completely empty.
+- **Existing Volumes:** If an existing volume is mounted, MongoDB skips initialization, and existing data/credentials remain untouched.
+- **Migration for Existing Volumes:** If upgrading an unauthenticated existing MongoDB container:
+  1. *Clean Re-initialization (if data can be cleared):*
+     ```bash
+     docker compose down -v
+     docker compose up -d
+     ```
+  2. *In-place User Creation (preserving existing data):*
+     Connect to the running container and create the admin user via `mongosh`:
+     ```bash
+     docker compose exec mongodb mongosh admin --eval 'db.createUser({user: "ecowing_admin", pwd: "your_secure_password", roles: [{role: "root", db: "admin"}]})'
+     ```
 
 ### Start the Backend Locally:
 ```bash
@@ -159,4 +184,4 @@ Headers:
 | `POST` | `/api/drone/telemetry` | `X-Drone-Token` | Ingests live telemetry with coordinate & battery validation (E2) |
 | `POST` | `/api/drone/detection` | `X-Drone-Token` | Ingests waste detection event (E2) |
 | `POST` | `/api/drone/stream-frame` | `X-Drone-Token` | Ingests live camera frame (E2) |
-| `GET` | `/video_feed` | Public | Live MJPEG camera feed |
+| `GET` | `/video_feed` | `X-Operator-Token` | Live MJPEG camera feed (gated by operator authentication) |

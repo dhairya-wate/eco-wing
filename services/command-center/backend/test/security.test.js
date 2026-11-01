@@ -1,3 +1,4 @@
+process.env.NODE_ENV = 'test';
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
@@ -16,6 +17,8 @@ const {
 } = require('../middleware/auth');
 
 const { validateTarget } = require('../routes/drone');
+const { validateMongoUriConfig, allowedOrigins } = require('../app');
+const { verifySocketDroneAuth } = require('../server');
 
 test('Operator Token Configuration Validation', async (t) => {
   await t.test('fails when operator token is empty', () => {
@@ -47,6 +50,89 @@ test('Constant-Time Comparison', async (t) => {
 
   await t.test('returns false for different lengths safely', () => {
     assert.equal(constantTimeCompare('short', 'much_longer_string_value'), false);
+  });
+});
+
+test('MongoDB Credentials Validation (Startup Check)', async (t) => {
+  await t.test('fails when MONGO_URI is missing or empty', () => {
+    assert.throws(() => validateMongoUriConfig(''), /is missing/);
+    assert.throws(() => validateMongoUriConfig(null), /is missing/);
+  });
+
+  await t.test('fails when MONGO_URI has no user credentials', () => {
+    assert.throws(
+      () => validateMongoUriConfig('mongodb://mongodb:27017/ecowing'),
+      /must include credentials/
+    );
+    assert.throws(
+      () => validateMongoUriConfig('mongodb://127.0.0.1:27017/ecowing'),
+      /must include credentials/
+    );
+  });
+
+  await t.test('succeeds when MONGO_URI contains credentials', () => {
+    const local = 'mongodb://ecowing_admin:secure_pass123@mongodb:27017/ecowing?authSource=admin';
+    assert.equal(validateMongoUriConfig(local), local);
+
+    const srv = 'mongodb+srv://admin_user:secret_password@cluster0.abc.mongodb.net/ecowing?retryWrites=true';
+    assert.equal(validateMongoUriConfig(srv), srv);
+  });
+});
+
+test('CORS Allowlist Validation (E-NEW1)', async (t) => {
+  await t.test('allowedOrigins list contains expected default origins', () => {
+    assert.ok(allowedOrigins.includes('http://localhost:8080'));
+    assert.ok(allowedOrigins.includes('http://127.0.0.1:8080'));
+    assert.ok(allowedOrigins.includes('http://localhost:3000'));
+    assert.ok(allowedOrigins.includes('http://127.0.0.1:3000'));
+  });
+
+  await t.test('wildcard origin is NOT present in allowedOrigins', () => {
+    assert.equal(allowedOrigins.includes('*'), false);
+  });
+});
+
+test('Socket.IO Drone Event Device Token Verification (E2 & E-NEW1)', async (t) => {
+  await t.test('verifySocketDroneAuth rejects missing drone_id', () => {
+    const socket = { droneId: null, droneToken: null, handshake: { auth: {} } };
+    const res = verifySocketDroneAuth(socket, {});
+    assert.equal(res.ok, false);
+    assert.match(res.error, /missing or invalid drone identifier/);
+  });
+
+  await t.test('verifySocketDroneAuth rejects missing token', () => {
+    const socket = { droneId: null, droneToken: null, handshake: { auth: {} } };
+    const res = verifySocketDroneAuth(socket, { drone_id: 'Drone-Alpha' });
+    assert.equal(res.ok, false);
+    assert.match(res.error, /missing drone device token/);
+  });
+
+  await t.test('verifySocketDroneAuth rejects invalid token', () => {
+    const socket = { droneId: null, droneToken: null, handshake: { auth: {} } };
+    const res = verifySocketDroneAuth(socket, { drone_id: 'Drone-Alpha', token: 'invalid_token_12345' });
+    assert.equal(res.ok, false);
+    assert.match(res.error, /invalid device token for drone 'Drone-Alpha'/);
+  });
+
+  await t.test('verifySocketDroneAuth rejects cross-drone token misuse', () => {
+    const socket = { droneId: null, droneToken: null, handshake: { auth: {} } };
+    // Drone-Alpha's token used with Drone-Beta ID
+    const res = verifySocketDroneAuth(socket, {
+      drone_id: 'Drone-Beta',
+      token: 'drone_alpha_token_12345678901234567890'
+    });
+    assert.equal(res.ok, false);
+    assert.match(res.error, /invalid device token for drone 'Drone-Beta'/);
+  });
+
+  await t.test('verifySocketDroneAuth succeeds with valid token', () => {
+    const socket = { droneId: null, droneToken: null, handshake: { auth: {} } };
+    const res = verifySocketDroneAuth(socket, {
+      drone_id: 'Drone-Alpha',
+      token: 'drone_alpha_token_12345678901234567890'
+    });
+    assert.equal(res.ok, true);
+    assert.equal(res.droneId, 'Drone-Alpha');
   });
 });
 
@@ -133,5 +219,44 @@ test('Target Address & Protocol Validation (SSRF & HTTPS Defense)', async (t) =>
     const res = await validateTarget('http://192.168.1.50:8080/stream');
     assert.equal(res.ok, false);
     assert.match(res.error, /not permitted by DRONE_TARGET_ALLOWLIST/);
+  });
+});
+
+test('Video Feed Operator Auth Gate (/video_feed)', async (t) => {
+  await t.test('verifyOperatorToken rejects request with missing X-Operator-Token with 401', () => {
+    let statusCode = null;
+    let jsonBody = null;
+    const req = { headers: {} };
+    const res = {
+      status(c) { statusCode = c; return this; },
+      json(b) { jsonBody = b; return this; }
+    };
+    verifyOperatorToken(req, res, () => {});
+    assert.equal(statusCode, 401);
+    assert.match(jsonBody.error, /invalid or missing operator token/);
+  });
+
+  await t.test('verifyOperatorToken rejects request with invalid X-Operator-Token with 401', () => {
+    let statusCode = null;
+    let jsonBody = null;
+    const req = { headers: { 'x-operator-token': 'wrong_token_12345' } };
+    const res = {
+      status(c) { statusCode = c; return this; },
+      json(b) { jsonBody = b; return this; }
+    };
+    verifyOperatorToken(req, res, () => {});
+    assert.equal(statusCode, 401);
+    assert.match(jsonBody.error, /invalid or missing operator token/);
+  });
+
+  await t.test('verifyOperatorToken accepts request with valid X-Operator-Token', () => {
+    let nextCalled = false;
+    const req = { headers: { 'x-operator-token': 'secure_test_operator_token_9xK2mP7qR4vL8wZ1' } };
+    const res = {
+      status() { return this; },
+      json() { return this; }
+    };
+    verifyOperatorToken(req, res, () => { nextCalled = true; });
+    assert.equal(nextCalled, true);
   });
 });

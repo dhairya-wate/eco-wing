@@ -6,6 +6,10 @@ services:
     environment:
       BACKEND_HOST: backend
       BACKEND_PORT: "3000"
+      DETECTION_HOST: host.docker.internal
+      DETECTION_PORT: "5000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       - backend
     restart: unless-stopped
@@ -16,6 +20,10 @@ services:
       PORT: "3000"
       MONGO_URI: ${MONGO_URI:?MONGO_URI is required}
       ECOWING_OPERATOR_TOKEN: ${ECOWING_OPERATOR_TOKEN:?ECOWING_OPERATOR_TOKEN is required}
+      DRONE_DEVICE_TOKENS: ${DRONE_DEVICE_TOKENS:-}
+      CORS_ORIGINS: "http://localhost:8080,http://127.0.0.1:8080,http://localhost:3000,http://127.0.0.1:3000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       - mongodb
     restart: unless-stopped

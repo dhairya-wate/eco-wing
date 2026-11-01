@@ -797,3 +797,130 @@ def test_purge_and_export_operator_auth_and_401():
         assert res["missing_token"] == 401, f"{path} should reject missing operator token with 401"
         assert res["invalid_token"] == 401, f"{path} should reject invalid operator token with 401"
         assert res["valid_token"] == 200, f"{path} should accept valid operator token with 200"
+
+
+def test_mongo_uri_credential_validation():
+    """Startup check: MONGO_URI must include credentials (user:password@)."""
+    code = """
+    const { validateMongoUriConfig } = require('./backend/app');
+    let errUncredentialed = null;
+    let errEmpty = null;
+    try {
+        validateMongoUriConfig('mongodb://mongodb:27017/ecowing');
+    } catch (e) {
+        errUncredentialed = e.message;
+    }
+    try {
+        validateMongoUriConfig('');
+    } catch (e) {
+        errEmpty = e.message;
+    }
+    const validLocal = validateMongoUriConfig('mongodb://admin:pass@mongodb:27017/ecowing?authSource=admin');
+    console.log(JSON.stringify({
+        has_uncredentialed_err: errUncredentialed !== null,
+        has_empty_err: errEmpty !== null,
+        valid_local: validLocal.includes('admin:pass@')
+    }));
+    process.exit(0);
+    """
+    out = run_node_eval(code)
+    assert out["has_uncredentialed_err"] is True
+    assert out["has_empty_err"] is True
+    assert out["valid_local"] is True
+
+
+def test_e_new1_cors_origin_allowlist():
+    """E-NEW1: Restrict CORS to configured origin allowlist (wildcard * is strictly rejected)."""
+    code = """
+    const { allowedOrigins } = require('./backend/app');
+    console.log(JSON.stringify({
+        has_wildcard: allowedOrigins.includes('*'),
+        has_local_8080: allowedOrigins.includes('http://localhost:8080'),
+        has_local_3000: allowedOrigins.includes('http://localhost:3000')
+    }));
+    process.exit(0);
+    """
+    out = run_node_eval(code)
+    assert out["has_wildcard"] is False
+    assert out["has_local_8080"] is True
+    assert out["has_local_3000"] is True
+
+
+def test_socket_io_drone_events_require_device_token():
+    """Socket.IO drone events (telemetry, detection, frame) require per-drone device token."""
+    code = """
+    process.env.DRONE_DEVICE_TOKENS = JSON.stringify({
+        'drone-alpha': 'token_alpha_12345678901234567890',
+        'drone-beta': 'token_beta_12345678901234567890'
+    });
+    const { verifySocketDroneAuth } = require('./backend/server');
+
+    // 1. Missing token -> rejected
+    const r1 = verifySocketDroneAuth({ droneId: null }, { drone_id: 'drone-alpha' });
+
+    // 2. Invalid token -> rejected
+    const r2 = verifySocketDroneAuth({ droneId: null }, { drone_id: 'drone-alpha', token: 'wrong' });
+
+    // 3. Cross-drone misuse (alpha token for beta drone) -> rejected
+    const r3 = verifySocketDroneAuth({ droneId: null }, { drone_id: 'drone-beta', token: 'token_alpha_12345678901234567890' });
+
+    // 4. Valid token -> accepted
+    const r4 = verifySocketDroneAuth({ droneId: null }, { drone_id: 'drone-alpha', token: 'token_alpha_12345678901234567890' });
+
+    console.log(JSON.stringify({
+        missing_token_ok: r1.ok,
+        invalid_token_ok: r2.ok,
+        cross_drone_ok: r3.ok,
+        valid_token_ok: r4.ok
+    }));
+    process.exit(0);
+    """
+    out = run_node_eval(code)
+    assert out["missing_token_ok"] is False
+    assert out["invalid_token_ok"] is False
+    assert out["cross_drone_ok"] is False
+    assert out["valid_token_ok"] is True
+
+
+def test_video_feed_operator_auth_gate():
+    """Proxied /video_feed operator auth gate rejects unauthenticated requests with 401."""
+    code = """
+    const express = require('express');
+    const http = require('http');
+    process.env.ECOWING_OPERATOR_TOKEN = 'secure_test_operator_token_9xK2mP7qR4vL8wZ1';
+    const app = require('./backend/app');
+
+    const srv = http.createServer(app);
+    srv.listen(0, '127.0.0.1', async () => {
+        const port = srv.address().port;
+        const url = `http://127.0.0.1:${port}/video_feed`;
+
+        // 1. Unauthenticated -> 401
+        const r1 = await fetch(url);
+
+        // 2. Invalid token -> 401
+        const r2 = await fetch(url, {
+            headers: { 'X-Operator-Token': 'wrong_operator_token_12345' }
+        });
+
+        // 3. With valid token -> starts streaming (200)
+        const controller = new AbortController();
+        const r3 = await fetch(url, {
+            headers: { 'X-Operator-Token': 'secure_test_operator_token_9xK2mP7qR4vL8wZ1' },
+            signal: controller.signal
+        });
+        controller.abort();
+
+        console.log(JSON.stringify({
+            unauth_status: r1.status,
+            bad_token_status: r2.status,
+            valid_token_status: r3.status
+        }));
+        srv.close();
+        setTimeout(() => process.exit(0), 50);
+    });
+    """
+    out = run_node_eval(code)
+    assert out["unauth_status"] == 401
+    assert out["bad_token_status"] == 401
+    assert out["valid_token_status"] == 200

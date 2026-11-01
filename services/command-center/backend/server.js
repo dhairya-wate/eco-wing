@@ -7,14 +7,17 @@ const Telemetry = require('./models/Telemetry');
 const Detection = require('./models/Detection');
 const { broadcastFrame } = require('./videoStream');
 const { computeDashboardStats } = require('./routes/api');
+const { allowedOrigins } = require('./app');
+const { getExpectedDroneToken, constantTimeCompare } = require('./middleware/auth');
 
 const server = http.createServer(app);
 
-// Configure Socket.IO with CORS
+// E-NEW1: Configure Socket.IO with restricted CORS allowlist
 const io = new Server(server, {
   cors: {
-    origin: '*',
-    methods: ['GET', 'POST']
+    origin: allowedOrigins,
+    methods: ['GET', 'POST'],
+    credentials: true
   },
   maxHttpBufferSize: 1e7 // 10MB for raw binary frames if streamed over WebSocket
 });
@@ -25,15 +28,45 @@ app.set('io', io);
 // Socket.IO event handling
 let nextSocketEventId = 1;
 
+/**
+ * Validates drone device token on incoming Socket.IO events.
+ * Prevents unauthenticated telemetry, detection, or frame injection over WebSockets.
+ */
+function verifySocketDroneAuth(socket, data) {
+  const droneId = data?.drone_id || socket?.droneId;
+  const token = data?.token || socket?.droneToken || socket?.handshake?.auth?.token || socket?.handshake?.headers?.['x-drone-token'];
+
+  if (!droneId || typeof droneId !== 'string') {
+    return { ok: false, error: "Unauthorized: missing or invalid drone identifier ('drone_id')." };
+  }
+  if (!token || typeof token !== 'string') {
+    return { ok: false, error: 'Unauthorized: missing drone device token.' };
+  }
+  const expectedToken = getExpectedDroneToken(droneId);
+  if (!expectedToken) {
+    return { ok: false, error: `Unauthorized: no device token configured for drone '${droneId}'.` };
+  }
+  if (!constantTimeCompare(String(token).trim(), expectedToken)) {
+    return { ok: false, error: `Unauthorized: invalid device token for drone '${droneId}'.` };
+  }
+  return { ok: true, droneId: droneId.trim(), token: token.trim() };
+}
+
 io.on('connection', (socket) => {
   console.log(`[Socket.IO] Client connected: ${socket.id}`);
 
-  // Allow a drone client to identify itself
+  // Allow a drone client to identify itself (requires device token)
   socket.on('register_drone', async (data) => {
-    const droneId = data?.drone_id || 'Drone-01';
+    const auth = verifySocketDroneAuth(socket, data);
+    if (!auth.ok) {
+      return socket.emit('drone:auth_error', { error: auth.error });
+    }
+
+    const droneId = auth.droneId;
     socket.join(`drone:${droneId}`);
     socket.droneId = droneId;
-    console.log(`[Socket.IO] Drone registered: ${droneId}`);
+    socket.droneToken = auth.token;
+    console.log(`[Socket.IO] Drone registered and authenticated: ${droneId}`);
 
     try {
       await Drone.findOneAndUpdate(
@@ -48,10 +81,15 @@ io.on('connection', (socket) => {
     }
   });
 
-  // Direct drone telemetry stream over WebSocket
+  // Direct drone telemetry stream over WebSocket (requires device token)
   socket.on('drone:telemetry', async (data) => {
+    const auth = verifySocketDroneAuth(socket, data);
+    if (!auth.ok) {
+      return socket.emit('drone:auth_error', { error: auth.error });
+    }
+
     try {
-      const droneId = data.drone_id || socket.droneId || 'Drone-01';
+      const droneId = auth.droneId;
 
       // Save to MongoDB
       const record = new Telemetry({
@@ -96,13 +134,18 @@ io.on('connection', (socket) => {
     }
   });
 
-  // Direct drone waste detection event over WebSocket
+  // Direct drone waste detection event over WebSocket (requires device token)
   socket.on('drone:detection', async (data) => {
+    const auth = verifySocketDroneAuth(socket, data);
+    if (!auth.ok) {
+      return socket.emit('drone:auth_error', { error: auth.error });
+    }
+
     try {
       const event_id = data.event_id || nextSocketEventId++;
       const detection = new Detection({
         event_id,
-        drone_id: data.drone_id || socket.droneId || 'Drone-01',
+        drone_id: auth.droneId,
         class_name: data.class_name,
         confidence: data.confidence,
         center: data.center,
@@ -119,10 +162,14 @@ io.on('connection', (socket) => {
     }
   });
 
-  // Direct drone camera frame stream over WebSocket
+  // Direct drone camera frame stream over WebSocket (requires device token)
   socket.on('drone:frame', (data) => {
-    if (data) {
-      broadcastFrame(data);
+    const auth = verifySocketDroneAuth(socket, data);
+    if (!auth.ok) {
+      return socket.emit('drone:auth_error', { error: auth.error });
+    }
+    if (data?.frame || (typeof data === 'string' && data)) {
+      broadcastFrame(data.frame || data);
     }
   });
 
@@ -141,8 +188,8 @@ io.on('connection', (socket) => {
   });
 });
 
-// Drone signal watchdog: detects lost telemetry links after 12 seconds of silence
-setInterval(async () => {
+// Drone signal watchdog: detects lost telemetry links after 12 seconds of silence (unref for clean tests)
+const watchdogInterval = setInterval(async () => {
   if (mongoose.connection.readyState !== 1) return;
   try {
     const timeoutThreshold = new Date(Date.now() - 12000);
@@ -173,16 +220,23 @@ setInterval(async () => {
     // quiet
   }
 }, 4000);
+if (watchdogInterval && typeof watchdogInterval.unref === 'function') {
+  watchdogInterval.unref();
+}
 
-const PORT = process.env.PORT || 3000;
-server.listen(PORT, '0.0.0.0', () => {
-  const MONGO_URI = process.env.MONGO_URI || process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/ecowing';
-  const safeLogUri = MONGO_URI.replace(/:([^:@]+)@/, ':****@');
-  console.log(`====================================================`);
-  console.log(` EcoWing Drone Fleet Command Center Backend Running`);
-  console.log(` Port: ${PORT}`);
-  console.log(` API Base: http://localhost:${PORT}/api`);
-  console.log(` Video Feed: http://localhost:${PORT}/video_feed`);
-  console.log(` MongoDB: ${safeLogUri}`);
-  console.log(`====================================================`);
-});
+if (require.main === module) {
+  const PORT = process.env.PORT || 3000;
+  server.listen(PORT, '0.0.0.0', () => {
+    const MONGO_URI = process.env.MONGO_URI || process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/ecowing';
+    const safeLogUri = MONGO_URI.replace(/:([^:@]+)@/, ':****@');
+    console.log(`====================================================`);
+    console.log(` EcoWing Drone Fleet Command Center Backend Running`);
+    console.log(` Port: ${PORT}`);
+    console.log(` API Base: http://localhost:${PORT}/api`);
+    console.log(` Video Feed: http://localhost:${PORT}/video_feed`);
+    console.log(` MongoDB: ${safeLogUri}`);
+    console.log(`====================================================`);
+  });
+}
+
+module.exports = { server, io, verifySocketDroneAuth };
