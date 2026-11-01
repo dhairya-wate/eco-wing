@@ -47,3 +47,5 @@ npm-debug.log*
 data/
 
 
+
+.pytest_cache/
