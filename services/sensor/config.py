@@ -53,6 +53,8 @@ TRUSTED_PROXIES = {p.strip().lower() for p in _raw_proxies.split(",") if p.strip
 ALLOW_LAN = os.getenv("ALLOW_LAN", "").lower() in ["true", "1", "yes"]
 DEFAULT_HOST = os.getenv("HOST", "0.0.0.0" if ALLOW_LAN else "127.0.0.1")
 DEFAULT_PORT = int(os.getenv("PORT", "5000"))
+DEFAULT_SOURCE = os.getenv("DETECTION_SOURCE", os.getenv("VIDEO_SOURCE", "simulator"))
+DETECTION_MAX_FPS = float(os.getenv("DETECTION_MAX_FPS", "30.0"))
 
 # CORS Configuration: Explicit origin allowlist (wildcard with credentials rejected)
 _raw_cors = os.getenv(

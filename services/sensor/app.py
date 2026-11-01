@@ -36,6 +36,7 @@ CLOSE_REASONS = {
     "SERVER_ERROR": "Internal server error: Frame ingestion failed"
 }
 
+from contextlib import asynccontextmanager
 from fastapi import (
     FastAPI, UploadFile, File, WebSocket, WebSocketDisconnect,
     Header, HTTPException, status, Depends, Request
@@ -46,8 +47,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import numpy as np
 
+from worker import DetectionWorker
 from config import (
-    DEFAULT_HOST, DEFAULT_PORT, DEFAULT_CONFIDENCE,
+    DEFAULT_HOST, DEFAULT_PORT, DEFAULT_CONFIDENCE, DEFAULT_SOURCE,
     get_local_ip, MODEL_PATH, WASTE_TAXONOMY,
     OPERATOR_TOKEN, CORS_ORIGINS, MAX_UPLOAD_SIZE_BYTES,
     MAX_WS_CONNECTIONS, MAX_MOBILE_WS_CONNECTIONS, sanitize_source_url,
@@ -57,7 +59,18 @@ from config import (
 from detector import WasteDetector
 from video_stream import VideoStreamManager
 
-app = FastAPI(title="EcoWing Waste Detection & Streaming System", version="1.0.0")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Lifespan context manager: starts background detection worker on startup and terminates on exit."""
+    worker.start()
+    yield
+    worker.stop()
+
+app = FastAPI(
+    title="EcoWing Waste Detection & Streaming System",
+    version="1.0.0",
+    lifespan=lifespan
+)
 
 # Security: Explicit CORS allowlist without insecure wildcard credentials
 app.add_middleware(
@@ -96,21 +109,17 @@ TEMPLATES_DIR.mkdir(parents=True, exist_ok=True)
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 # Shared state
+LOCAL_IP = get_local_ip()
 detector = WasteDetector(confidence=DEFAULT_CONFIDENCE)
-stream_mgr = VideoStreamManager(source=0)
-latest_summary = {
-    "total_count": 0,
-    "recyclable_count": 0,
-    "non_recyclable_count": 0,
-    "biodegradable_count": 0,
-    "non_biodegradable_count": 0,
-    "items": [],
-    "timestamp": time.time()
-}
+stream_mgr = VideoStreamManager(source=DEFAULT_SOURCE)
+worker = DetectionWorker(
+    detector=detector,
+    stream_mgr=stream_mgr,
+    watermark=f"{LOCAL_IP}:{DEFAULT_PORT}"
+)
 active_websockets = set()
 active_mobile_websockets = set()
 pending_mobile_websockets = set()
-LOCAL_IP = get_local_ip()
 
 # Mobile Camera Pairing State (In-Memory Only)
 UNAMBIGUOUS_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
@@ -276,38 +285,17 @@ class CodeExchangeRequest(BaseModel):
 async def video_feed(request: Request, overlay: bool = True):
     """
     Primary public video stream endpoint.
-    Embed in EcoWing website with:
-    <img src="http://<IP>:<PORT>/video_feed" />
+    Reads latest pre-rendered frame from background detection worker without per-viewer detection overhead.
     """
     async def frame_stream():
-        global latest_summary
-        server_watermark = f"{LOCAL_IP}:{DEFAULT_PORT}"
         try:
             while True:
-                frame = stream_mgr.get_frame()
-                if frame is None or frame.size == 0:
-                    await asyncio.sleep(0.04)
+                jpeg_bytes = worker.get_latest_jpeg()
+                if jpeg_bytes is None:
+                    await asyncio.sleep(0.03)
                     continue
-                    
-                annotated_frame, summary = await asyncio.to_thread(
-                    detector.detect,
-                    frame, 
-                    draw_overlay=overlay,
-                    server_info=server_watermark
-                )
-                latest_summary = summary
-                
-                # Encode frame to JPEG
-                ret, buffer = cv2.imencode('.jpg', annotated_frame, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
-                if not ret:
-                    await asyncio.sleep(0.02)
-                    continue
-                    
-                frame_bytes = buffer.tobytes()
                 yield (b'--frame\r\n'
-                       b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
-                
-                # Regulate framerate (~25-30 FPS)
+                       b'Content-Type: image/jpeg\r\n\r\n' + jpeg_bytes + b'\r\n')
                 await asyncio.sleep(0.033)
         except asyncio.CancelledError:
             pass
@@ -322,7 +310,7 @@ def get_detections():
     """Returns the latest real-time waste classification and counts as public JSON."""
     return JSONResponse(content={
         "status": "success",
-        "data": latest_summary
+        "data": worker.get_latest_summary()
     })
 
 @app.get("/api/system_info", dependencies=[Depends(verify_operator_token)])
@@ -551,7 +539,7 @@ async def websocket_telemetry(websocket: WebSocket):
         while True:
             payload = {
                 "type": "telemetry",
-                "summary": latest_summary,
+                "summary": worker.get_latest_summary(),
                 "server_time": time.time()
             }
             await websocket.send_text(json.dumps(payload))
@@ -693,7 +681,7 @@ async def websocket_mobile_stream(websocket: WebSocket):
 
             await websocket.send_text(json.dumps({
                 "type": "detection_feedback",
-                "data": latest_summary
+                "data": worker.get_latest_summary()
             }))
     except WebSocketDisconnect:
         logger.info("Mobile stream client disconnected cleanly")
