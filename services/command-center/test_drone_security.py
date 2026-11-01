@@ -1301,5 +1301,18 @@ def test_e9_physical_drone_safety_controls_and_state_machine():
     # 6. ACK timeout
     assert out["stateTimedOut"] == "timed_out"
 
-
-
+def test_e8_telemetry_ttl_index_configuration():
+    code = """
+    const Telemetry = require('./backend/models/Telemetry');
+    const indexes = Telemetry.schema.indexes();
+    const ttlIndex = indexes.find(entry => entry[0] && entry[0].timestamp === 1 && typeof entry[1].expireAfterSeconds === 'number');
+    console.log(JSON.stringify({
+        defaultTTL: Telemetry.TELEMETRY_TTL_SECONDS,
+        hasTtlIndex: !!ttlIndex,
+        expireAfterSeconds: ttlIndex ? ttlIndex[1].expireAfterSeconds : null
+    }));
+    """
+    out = run_node_eval(code)
+    assert out['defaultTTL'] == 604800
+    assert out['hasTtlIndex'] is True
+    assert out['expireAfterSeconds'] == 604800

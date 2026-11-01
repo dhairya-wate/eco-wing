@@ -68,8 +68,7 @@ const telemetrySchema = new mongoose.Schema(
     },
     timestamp: {
       type: Date,
-      default: Date.now,
-      index: true
+      default: Date.now
     }
   },
   {
@@ -77,5 +76,11 @@ const telemetrySchema = new mongoose.Schema(
   }
 );
 
-module.exports = mongoose.model('Telemetry', telemetrySchema);
+// E8: Enforce TTL expiration index on telemetry data (default: 7 days = 604800 seconds)
+const TELEMETRY_TTL_SECONDS = parseInt(process.env.TELEMETRY_TTL_SECONDS || '604800', 10);
+telemetrySchema.index({ timestamp: 1 }, { expireAfterSeconds: TELEMETRY_TTL_SECONDS });
+
+const Telemetry = mongoose.model('Telemetry', telemetrySchema);
+Telemetry.TELEMETRY_TTL_SECONDS = TELEMETRY_TTL_SECONDS;
+module.exports = Telemetry;
 

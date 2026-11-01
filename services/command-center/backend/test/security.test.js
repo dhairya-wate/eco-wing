@@ -1,3 +1,4 @@
+const Telemetry = require('../models/Telemetry');
 process.env.NODE_ENV = 'test';
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -458,5 +459,19 @@ test('Drone Safety Command Manager & State Machine (E9)', async (t) => {
     const updated = cm.getCommand(cmd.command_id);
     assert.equal(updated.state, 'timed_out');
     assert.match(updated.error_message, /ACK timeout/);
+  });
+});
+
+test('Telemetry Model TTL Index Configuration (E8)', async (t) => {
+  await t.test('has configurable TTL seconds defaulting to 7 days', () => {
+    assert.equal(typeof Telemetry.TELEMETRY_TTL_SECONDS, 'number');
+    assert.equal(Telemetry.TELEMETRY_TTL_SECONDS, 604800);
+  });
+
+  await t.test('declares schema TTL index on timestamp with expireAfterSeconds', () => {
+    const indexes = Telemetry.schema.indexes();
+    const ttlIndex = indexes.find(entry => entry[0] && entry[0].timestamp === 1 && typeof entry[1].expireAfterSeconds === 'number');
+    assert.ok(ttlIndex, 'TTL index on timestamp must be defined');
+    assert.equal(ttlIndex[1].expireAfterSeconds, Telemetry.TELEMETRY_TTL_SECONDS);
   });
 });
