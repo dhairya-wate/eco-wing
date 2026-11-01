@@ -27,6 +27,7 @@ const {
   validateCanonicalDetectionEvent,
   validateDetectionPayload
 } = require('../validators/detectionValidator');
+const detectionStore = require('../detectionStore');
 
 test('Operator Token Configuration Validation', async (t) => {
   await t.test('fails when operator token is empty', () => {
@@ -395,6 +396,89 @@ test('Canonical Detection Event Schema Validation', async (t) => {
     const res = validateCanonicalDetectionEvent(bad);
     assert.equal(res.valid, false);
     assert.ok(res.errors.some(e => e.includes('bbox')));
+  });
+
+  await t.test('detectionStore deduplicates identical canonical_event_id', () => {
+    const origCount = detectionStore.events.length;
+    const testId = 'idemp-uuid-1111-2222-3333-444455556666';
+    const first = detectionStore.addDetection({
+      canonical_event_id: testId,
+      class_name: 'bottle',
+      confidence: 0.95
+    });
+    const afterFirst = detectionStore.events.length;
+    assert.equal(afterFirst, origCount + 1);
+
+    const second = detectionStore.addDetection({
+      canonical_event_id: testId,
+      class_name: 'bottle',
+      confidence: 0.95
+    });
+    const afterSecond = detectionStore.events.length;
+    assert.equal(afterSecond, origCount + 1, 'Store length must not grow on duplicate canonical_event_id');
+    assert.equal(second.event_id, first.event_id, 'Duplicate must return existing event object');
+  });
+
+  await t.test('POST /api/drone/detection endpoint is strictly idempotent on duplicate event_id', async () => {
+    const express = require('express');
+    const http = require('http');
+    const droneRouter = require('../routes/drone');
+    const testApp = express();
+    testApp.use(express.json());
+    testApp.use('/api/drone', droneRouter);
+
+    const srv = http.createServer(testApp);
+    await new Promise(r => srv.listen(0, '127.0.0.1', r));
+    const port = srv.address().port;
+
+    const dupEvent = {
+      event_id: '99999999-8888-4777-a666-555544443333',
+      drone_id: 'Drone-Alpha',
+      source: 'camera',
+      observed_at: new Date().toISOString(),
+      taxonomy_version: '1.0.0',
+      classification_method: 'coco_mapping',
+      items: [{
+        class_id: 'bottle',
+        coco_label: 'bottle',
+        confidence: 0.92,
+        bbox: [10, 10, 100, 100]
+      }]
+    };
+
+    const headers = {
+      'Content-Type': 'application/json',
+      'X-Drone-Id': 'Drone-Alpha',
+      'X-Drone-Token': 'drone_alpha_token_12345678901234567890'
+    };
+
+    const countBefore = detectionStore.events.length;
+
+    // First push
+    const res1 = await fetch('http://127.0.0.1:' + port + '/api/drone/detection', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(dupEvent)
+    });
+    assert.equal(res1.status, 200);
+    const json1 = await res1.json();
+    assert.equal(json1.success, true);
+    assert.equal(json1.count, 1);
+    assert.equal(detectionStore.events.length, countBefore + 1);
+
+    // Second push with identical event_id (idempotence verification)
+    const res2 = await fetch('http://127.0.0.1:' + port + '/api/drone/detection', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(dupEvent)
+    });
+    assert.equal(res2.status, 200);
+    const json2 = await res2.json();
+    assert.equal(json2.success, true);
+    assert.equal(json2.duplicate, true, 'Second push must flag duplicate');
+    assert.equal(detectionStore.events.length, countBefore + 1, 'Second push must NOT create additional document');
+
+    await new Promise(r => srv.close(r));
   });
 });
 

@@ -1174,6 +1174,90 @@ def test_detection_ingestion_canonical_schema_validation_and_rejection():
     assert out["status5"] == 400, f"Expected 400 for empty payload, got {out['status5']}"
 
 
+def test_i1_detection_ingestion_idempotency_and_outbox_contract():
+    """
+    Phase 5.1 / I1: Dedicated automated test asserting detection ingestion idempotency
+    and contract verification:
+    1. First push of canonical detection event stores exactly 1 document.
+    2. Second push of identical event_id returns 200 with duplicate: true and does NOT create duplicate documents.
+    """
+    code = """
+    const express = require('express');
+    const http = require('http');
+
+    process.env.ECOWING_OPERATOR_TOKEN = 'secure_test_operator_token_9xK2mP7qR4vL8wZ1';
+    process.env.DRONE_DEVICE_TOKENS = JSON.stringify({
+        'drone-alpha': 'token_alpha_12345678901234567890'
+    });
+
+    const droneRouter = require('./backend/routes/drone');
+    const detectionStore = require('./backend/detectionStore');
+    const app = express();
+    app.use(express.json());
+    app.use('/api/drone', droneRouter);
+
+    const srv = http.createServer(app);
+    srv.listen(0, '127.0.0.1', async () => {
+        const port = srv.address().port;
+        const url = `http://127.0.0.1:${port}/api/drone/detection`;
+        const headers = {
+            'Content-Type': 'application/json',
+            'X-Drone-Token': 'token_alpha_12345678901234567890',
+            'X-Drone-Id': 'drone-alpha'
+        };
+
+        const event = {
+            event_id: 'aaaa1111-bb22-4c33-8d44-eeee55556666',
+            drone_id: 'drone-alpha',
+            source: 'camera',
+            observed_at: new Date().toISOString(),
+            taxonomy_version: '1.0.0',
+            classification_method: 'coco_mapping',
+            items: [
+                {
+                    class_id: 'bottle',
+                    coco_label: 'bottle',
+                    confidence: 0.91,
+                    bbox: [10, 10, 50, 50]
+                }
+            ]
+        };
+
+        const count0 = detectionStore.events.length;
+
+        // Push 1
+        const r1 = await fetch(url, { method: 'POST', headers, body: JSON.stringify(event) });
+        const b1 = await r1.json();
+        const count1 = detectionStore.events.length;
+
+        // Push 2 (identical event_id)
+        const r2 = await fetch(url, { method: 'POST', headers, body: JSON.stringify(event) });
+        const b2 = await r2.json();
+        const count2 = detectionStore.events.length;
+
+        srv.close(() => {
+            console.log(JSON.stringify({
+                status1: r1.status,
+                success1: b1.success,
+                count1: count1 - count0,
+                status2: r2.status,
+                success2: b2.success,
+                duplicate2: Boolean(b2.duplicate),
+                count2: count2 - count0
+            }));
+        });
+    });
+    """
+    out = run_node_eval(code)
+    assert out["status1"] == 200
+    assert out["success1"] is True
+    assert out["count1"] == 1, "First push must store exactly 1 document"
+    assert out["status2"] == 200
+    assert out["success2"] is True
+    assert out["duplicate2"] is True, "Second push must return duplicate: true"
+    assert out["count2"] == 1, "Second push must NOT store duplicate document"
+
+
 def test_e9_physical_drone_safety_controls_and_state_machine():
     """
     Physical Drone Safety Controls (E9):

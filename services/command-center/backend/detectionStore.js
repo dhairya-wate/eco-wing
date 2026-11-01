@@ -57,6 +57,13 @@ class DetectionStore {
   }
 
   addDetection(data) {
+    if (data.canonical_event_id) {
+      const existing = this.events.find(e => e.canonical_event_id === data.canonical_event_id);
+      if (existing) {
+        return existing;
+      }
+    }
+
     const rawConf = Number(data.confidence) || 0;
     // Normalize confidence to 0.0 - 1.0 range
     const confidence = rawConf > 1 ? Number((rawConf / 100).toFixed(2)) : Number(rawConf.toFixed(2));
@@ -79,11 +86,18 @@ class DetectionStore {
 
     const detObj = {
       event_id: eventId,
+      canonical_event_id: data.canonical_event_id || null,
       drone_id: data.drone_id || 'Drone-01',
       class_name: className,
+      coco_label: data.coco_label || className,
       material_type: materialType,
+      category: data.category || 'General',
+      material: data.material || 'unknown',
+      recyclable: data.recyclable !== undefined ? Boolean(data.recyclable) : (materialType === 'Recyclable'),
+      biodegradable: data.biodegradable !== undefined ? Boolean(data.biodegradable) : (materialType === 'Biodegradable'),
       confidence: confidence,
       center: center,
+      bbox: data.bbox || null,
       timestamp: timestamp,
       createdAt: data.createdAt || new Date().toISOString()
     };
@@ -96,6 +110,17 @@ class DetectionStore {
 
     this.saveToDisk();
     return detObj;
+  }
+
+  getByCanonicalEventId(canonicalId) {
+    if (!canonicalId) return [];
+    return this.events.filter(e => e.canonical_event_id === canonicalId);
+  }
+
+  clear() {
+    this.events = [];
+    this.nextEventId = 1;
+    this.saveToDisk();
   }
 
   getEvents(limit = 200) {

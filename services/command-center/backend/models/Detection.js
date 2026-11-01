@@ -21,6 +21,11 @@ const detectionSchema = new mongoose.Schema(
       required: true,
       index: true
     },
+    canonical_event_id: {
+      type: String,
+      sparse: true,
+      index: true
+    },
     drone_id: {
       type: String,
       default: 'Drone-01',

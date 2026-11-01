@@ -477,6 +477,22 @@ router.post('/detection', verifyDroneToken, ingestionRateLimiter, async (req, re
 
     // 1. Canonical Detection Event Ingestion (Array of items matching detection-event.schema.json)
     if (valResult.isCanonical && Array.isArray(data.items)) {
+      // Idempotency check: if canonical_event_id has already been ingested, return existing
+      if (data.event_id) {
+        const existingStored = typeof detectionStore.getByCanonicalEventId === 'function'
+          ? detectionStore.getByCanonicalEventId(data.event_id)
+          : [];
+        if (existingStored && existingStored.length > 0) {
+          return res.json({ success: true, count: existingStored.length, duplicate: true, events: existingStored });
+        }
+        if (mongoose.connection.readyState === 1) {
+          const existingDocs = await Detection.find({ canonical_event_id: data.event_id });
+          if (existingDocs && existingDocs.length > 0) {
+            return res.json({ success: true, count: existingDocs.length, duplicate: true, events: existingDocs });
+          }
+        }
+      }
+
       const savedEvents = [];
       const obsTime = data.observed_at ? new Date(data.observed_at) : new Date();
 
