@@ -769,7 +769,57 @@ def test_sanitize_source_url_redacts_credentials():
     # Simulator / non-URL source
     assert sanitize_source_url("simulator") == "simulator"
     assert sanitize_source_url("") == ""
+def test_d3_cors_allowlist_and_rejection():
+    """
+    D3: Verify that CORS is strictly restricted to CORS_ORIGINS allowlist,
+    wildcards with credentials are not present, and unauthorized origins receive no CORS header.
+    """
+    from config import CORS_ORIGINS
+    assert "*" not in CORS_ORIGINS
+    assert "http://localhost:8080" in CORS_ORIGINS
+
+    # 1. Authorized origin preflight OPTIONS request
+    res_auth = client.options(
+        "/api/detections",
+        headers={
+            "Origin": "http://localhost:8080",
+            "Access-Control-Request-Method": "GET"
+        }
+    )
+    assert res_auth.headers.get("access-control-allow-origin") == "http://localhost:8080"
+
+    # 2. Unauthorized origin preflight OPTIONS request
+    res_unauth = client.options(
+        "/api/detections",
+        headers={
+            "Origin": "http://evil-attacker.com",
+            "Access-Control-Request-Method": "GET"
+        }
+    )
+    assert "access-control-allow-origin" not in res_unauth.headers
 
 
+def test_d8_reverse_proxy_https_and_relative_paths():
+    """
+    D8: Verifies that /api/system_info respects X-Forwarded-Proto and X-Forwarded-Host
+    under TLS reverse proxy and emits relative stream paths to eliminate mixed content blocking.
+    """
+    # 1. Access with HTTPS forwarded headers
+    headers = {
+        "X-Operator-Token": TEST_OPERATOR_TOKEN,
+        "X-Forwarded-Proto": "https",
+        "X-Forwarded-Host": "ecowing.fleet.example.com"
+    }
+    res = client.get("/api/system_info", headers=headers)
+    assert res.status_code == 200
+    data = res.json()
 
+    assert data["video_stream_url"] == "https://ecowing.fleet.example.com/video_feed"
+    assert data["api_detections_url"] == "https://ecowing.fleet.example.com/api/detections"
+    assert data["mobile_stream_url"] == "https://ecowing.fleet.example.com/mobile"
 
+    # Relative paths for same-origin embedding
+    assert data["relative_stream_path"] == "/video_feed"
+    assert data["relative_api_path"] == "/api/detections"
+    assert 'src="/video_feed"' in data["integration_examples"]["html_relative"]
+    assert 'fetch("/api/detections")' in data["integration_examples"]["fetch_js_relative"]

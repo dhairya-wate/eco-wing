@@ -333,11 +333,16 @@ def get_detections():
     })
 
 @app.get("/api/system_info", dependencies=[Depends(verify_operator_token)])
-def get_system_info():
+def get_system_info(request: Request):
     """Provides IP addresses, stream endpoints, and integration code snippets (Operator Protected)."""
-    stream_url = f"http://{LOCAL_IP}:{DEFAULT_PORT}/video_feed"
-    api_url = f"http://{LOCAL_IP}:{DEFAULT_PORT}/api/detections"
-    mobile_url = f"http://{LOCAL_IP}:{DEFAULT_PORT}/mobile"
+    # D8: Respect forwarded protocol and host when accessed through TLS reverse-proxy to prevent mixed content
+    proto = request.headers.get("x-forwarded-proto", request.url.scheme or "http")
+    host_hdr = request.headers.get("x-forwarded-host") or request.headers.get("host")
+    base = f"{proto}://{host_hdr}" if host_hdr else f"{proto}://{LOCAL_IP}:{DEFAULT_PORT}"
+
+    stream_url = f"{base}/video_feed"
+    api_url = f"{base}/api/detections"
+    mobile_url = f"{base}/mobile"
     
     return {
         "status": "online",
@@ -347,14 +352,19 @@ def get_system_info():
         "video_stream_url": stream_url,
         "api_detections_url": api_url,
         "mobile_stream_url": mobile_url,
+        "relative_stream_path": "/video_feed",
+        "relative_api_path": "/api/detections",
         "is_simulator": stream_mgr.is_simulator,
         "current_source": sanitize_source_url(stream_mgr.source),
         "confidence_threshold": detector.confidence,
         "model_file": MODEL_PATH.name,
         "integration_examples": {
             "html": f'<img src="{stream_url}" alt="EcoWing Waste Detection Stream" style="width: 100%; border-radius: 12px;" />',
+            "html_relative": '<img src="/video_feed" alt="EcoWing Waste Detection Stream" style="width: 100%; border-radius: 12px;" />',
             "react": f'<img src="{stream_url}" alt="EcoWing Stream" className="w-full rounded-xl shadow-md" />',
-            "fetch_js": f'fetch("{api_url}").then(r => r.json()).then(data => console.log(data));'
+            "react_relative": '<img src="/video_feed" alt="EcoWing Stream" className="w-full rounded-xl shadow-md" />',
+            "fetch_js": f'fetch("{api_url}").then(r => r.json()).then(data => console.log(data));',
+            "fetch_js_relative": 'fetch("/api/detections").then(r => r.json()).then(data => console.log(data));'
         }
     }
 
