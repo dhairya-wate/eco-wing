@@ -117,7 +117,7 @@ document.addEventListener("DOMContentLoaded", () => {
   let isCameraActive = false;
   let isRelaying = false;
   let relayInterval = null;
-  let relayTarget = localStorage.getItem("ecowing_target_website") || "https://eco-wing-7pua.vercel.app";
+  let relayTarget = localStorage.getItem("ecowing_target_website") || "http://localhost:3000";
   let lastRelayDetectionTime = 0;
 
   if (targetWebsiteUrl) targetWebsiteUrl.value = relayTarget;
@@ -325,7 +325,7 @@ document.addEventListener("DOMContentLoaded", () => {
             if (now - lastRelayDetectionTime > 1200) {
               lastRelayDetectionTime = now;
               const top = wasteItems[0];
-              const endpoint = (relayTarget || "https://eco-wing-7pua.vercel.app").replace(/\/$/, "");
+              const endpoint = (relayTarget || "http://localhost:3000").replace(/\/$/, "");
               fetch(`${endpoint}/api/drone/detection`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
