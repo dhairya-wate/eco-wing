@@ -542,3 +542,23 @@ test('Ingestion Rate Limiting & Body Limits (E7)', async (t) => {
     limiter.cleanup();
   });
 });
+
+test('Infrastructure & Compose Hardening (E10, E11)', async (t) => {
+  const fs = require('fs');
+  const path = require('path');
+
+  await t.test('package.json declares Node engine >=20.0.0', () => {
+    const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf-8'));
+    assert.ok(pkg.engines, 'package.json must contain engines field');
+    assert.equal(pkg.engines.node, '>=20.0.0');
+  });
+
+  await t.test('docker-compose.yml pins mongo image, adds --auth flag, and specifies service_healthy healthcheck', () => {
+    const composeContent = fs.readFileSync(path.join(__dirname, '..', '..', 'docker-compose.yml'), 'utf-8');
+    assert.match(composeContent, /image:\s*mongo:7\.0\.14-jammy/, 'MongoDB image must be pinned');
+    assert.match(composeContent, /command:\s*\["--auth"\]/, 'MongoDB must run with --auth command flag');
+    assert.match(composeContent, /healthcheck:/, 'MongoDB must have healthcheck');
+    assert.match(composeContent, /db\.adminCommand\('ping'\)/, 'MongoDB healthcheck must ping adminCommand');
+    assert.match(composeContent, /condition:\s*service_healthy/, 'backend depends_on must require service_healthy condition');
+  });
+});

@@ -1413,3 +1413,22 @@ def test_e7_payload_size_limit_and_ingestion_rate_limiting():
     assert out["passCount"] == 2
     assert out["rateLimitStatus"] == 429
     assert int(out["retryAfter"]) >= 1
+
+def test_e10_e11_docker_compose_and_node_engine_hardening():
+    """E10 & E11: Compose healthchecks, pinned MongoDB image, --auth flag, and declared Node engine."""
+    import json
+    pkg_path = os.path.join(ECOWING_DIR, "backend", "package.json")
+    with open(pkg_path, "r", encoding="utf-8") as f:
+        pkg = json.load(f)
+    assert "engines" in pkg
+    assert pkg["engines"]["node"] == ">=20.0.0"
+
+    compose_path = os.path.join(ECOWING_DIR, "docker-compose.yml")
+    with open(compose_path, "r", encoding="utf-8") as f:
+        compose_content = f.read()
+
+    assert "image: mongo:7.0.14-jammy" in compose_content
+    assert 'command: ["--auth"]' in compose_content
+    assert "healthcheck:" in compose_content
+    assert "db.adminCommand('ping')" in compose_content
+    assert "condition: service_healthy" in compose_content
