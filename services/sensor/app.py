@@ -8,6 +8,7 @@ if sys.platform == "win32":
 
 import cv2
 import time
+import datetime
 import json
 import struct
 import asyncio
@@ -50,6 +51,7 @@ import numpy as np
 from worker import DetectionWorker
 from config import (
     DEFAULT_HOST, DEFAULT_PORT, DEFAULT_CONFIDENCE, DEFAULT_SOURCE,
+    DETECTION_STALE_AFTER_SECONDS,
     get_local_ip, MODEL_PATH, WASTE_TAXONOMY,
     OPERATOR_TOKEN, CORS_ORIGINS, MAX_UPLOAD_SIZE_BYTES,
     MAX_WS_CONNECTIONS, MAX_MOBILE_WS_CONNECTIONS, sanitize_source_url,
@@ -307,10 +309,18 @@ async def video_feed(request: Request, overlay: bool = True):
 
 @app.get("/api/detections")
 def get_detections():
-    """Returns the latest real-time waste classification and counts as public JSON."""
+    """Returns the latest real-time waste classification, counts, and staleness metadata as public JSON."""
+    summary, last_update = worker.get_latest_summary_and_update_time()
+    now = time.time()
+    age = max(0.0, round(now - last_update, 3))
+    stale = age > DETECTION_STALE_AFTER_SECONDS
     return JSONResponse(content={
         "status": "success",
-        "data": worker.get_latest_summary()
+        "timestamp": last_update,
+        "timestamp_iso": datetime.datetime.fromtimestamp(last_update, tz=datetime.timezone.utc).isoformat(),
+        "age_seconds": age,
+        "stale": stale,
+        "data": summary
     })
 
 @app.get("/api/system_info", dependencies=[Depends(verify_operator_token)])
@@ -322,6 +332,7 @@ def get_system_info():
     
     return {
         "status": "online",
+        "worker_running": worker.is_running,
         "local_ip": LOCAL_IP,
         "port": DEFAULT_PORT,
         "video_stream_url": stream_url,
