@@ -36,9 +36,23 @@ EcoWing connects autonomous drones and field mobile camera sensors to an operato
    - Detection service authenticates to EcoWing via dedicated `DETECTION_SERVICE_TOKEN` on `POST /api/mobile/verify_code`. The operator token (`X-Operator-Token`) never leaves EcoWing and is never exposed to mobile web clients.
    - Unified revocation endpoint across both services: `POST /api/mobile/revoke-session`.
 
-3. **Backward Compatibility & Ingestion Migration**:
+3. **API Contracts, Data Masking & Command Routing**:
+   - **`GET /api/devices` Metadata Only Response Contract**:
+     - To prevent credential leakage, `GET /api/devices` returns metadata only: `id`, `device_id`, `name`, `type`, `status`, `created_at`, `revoked_at`, and `fingerprint` (the first 8 hex characters of the SHA-256 `token_hash`).
+     - **Strict Security Guarantee**: The full `token_hash` and raw `device_token` are **NEVER** returned in device listings or logs. Raw tokens are only exposed once in the payload of `POST /api/devices` (or token rotation).
+   - **Unified Command Endpoint**:
+     - All commands for drones and phone sensors are dispatched exclusively via `POST /api/drone/command` with a `target` discriminator (`"drone"` or `"phone"`). `POST /api/device/command` is deprecated and removed.
+     - Flight commands (`start`, `hold`, `rth`, `land`, `estop`) are gated by telemetry freshness and sent to the drone channel.
+     - Phone stream commands (`pause_stream`, `resume_stream`, `set_confidence`) are validated against schema constraints and dispatched to the phone channel.
+   - **Public QR Code Derivation**:
+     - Mobile pairing URLs and QR codes are generated dynamically using `ECOWING_PUBLIC_URL` at `/mobile?code=...`.
+     - When `ECOWING_PUBLIC_URL` is unset, the server returns `mobile_url: null` and the dashboard displays a clear configuration warning instead of generating a QR code. No external or third-party host is hardcoded.
+
+4. **Backward Compatibility & Ingestion Migration**:
    - Existing drone tokens configured via `DRONE_DEVICE_TOKENS` and `DRONE_TOKEN_<ID>` continue to function through a transparent fallback in `verifyDroneToken`, ensuring zero interruption to in-flight drone telemetry.
-   - A database migration script transfers environment tokens into the `Device` collection with SHA-256 hashing.
+   - A one-time startup deprecation warning is logged when `DRONE_DEVICE_TOKENS` is present, without logging any token values.
+   - A toggle flag `LEGACY_ENV_TOKENS_ENABLED` (default: `true`) permits operators to disable environment token fallbacks entirely once migration is verified.
+   - A database migration script (`migrateDroneTokens()`) transfers environment tokens into the `Device` collection with SHA-256 hashing. Devices registered in the database authenticate solely through constant-time comparison of `token_hash` and never invoke the legacy fallback.
 
 ## Consequences
 - **Positive**: Provides enterprise-grade device governance; prevents credential replay and token exposure; enables instant session revocation; allows dynamic phone and drone registration without restarting command center services.
