@@ -117,6 +117,25 @@ function verifyServiceToken(req, res, next) {
   next();
 }
 
+// Migration flag: controls whether fallback to DRONE_DEVICE_TOKENS is active
+let LEGACY_ENV_TOKENS_ENABLED = process.env.LEGACY_ENV_TOKENS_ENABLED !== 'false';
+
+function setLegacyEnvTokensEnabled(val) {
+  LEGACY_ENV_TOKENS_ENABLED = Boolean(val);
+}
+
+function getLegacyEnvTokensEnabled() {
+  return LEGACY_ENV_TOKENS_ENABLED;
+}
+
+// Log a one-time deprecation warning at startup if the env var is set, without logging any token values
+if (process.env.DRONE_DEVICE_TOKENS && process.env.DRONE_DEVICE_TOKENS.trim()) {
+  console.warn(
+    "[SECURITY DEPRECATION WARNING] 'DRONE_DEVICE_TOKENS' is deprecated and will be removed in a future release. " +
+    "Please migrate drone device tokens to the Device store using migrateDroneTokens()."
+  );
+}
+
 /**
  * Middleware: Enforces per-drone/device token on ingestion routes.
  * Checks new DeviceStore (MongoDB/hashed token) with fallback
@@ -149,24 +168,39 @@ function verifyDroneToken(req, res, next) {
 
   const cleanToken = String(token).trim();
 
-  // 1. Fast synchronous check against in-memory DeviceStore
-  if (deviceStore && typeof deviceStore.verifyDeviceTokenSync === 'function') {
-    if (deviceStore.verifyDeviceTokenSync(droneId, cleanToken)) {
-      req.authenticatedDroneId = droneId;
-      return next();
-    }
-  }
+  // 1. Primary path: DeviceStore check with SHA-256 hash & constant-time comparison
+  const storedDevice = deviceStore && typeof deviceStore.getDeviceRecordSync === 'function'
+    ? deviceStore.getDeviceRecordSync(droneId)
+    : null;
 
-  // 2. Migration fallback path: Environment variables (DRONE_DEVICE_TOKENS, DRONE_TOKEN_<ID>)
-  const expectedToken = getExpectedDroneToken(droneId);
-  if (expectedToken) {
-    if (constantTimeCompare(cleanToken, expectedToken)) {
-      req.authenticatedDroneId = droneId;
-      return next();
+  if (storedDevice && storedDevice.status === 'active' && storedDevice.token_hash) {
+    const presentedHash = crypto.createHash('sha256').update(cleanToken).digest('hex');
+    const bufPresented = Buffer.from(presentedHash, 'hex');
+    const bufStored = Buffer.from(storedDevice.token_hash, 'hex');
+    if (bufPresented.length === bufStored.length && bufPresented.length > 0) {
+      if (crypto.timingSafeEqual(bufPresented, bufStored)) {
+        req.authenticatedDroneId = droneId;
+        return next();
+      }
     }
     return res.status(401).json({
       error: `Unauthorized: invalid device token for drone '${droneId}'.`
     });
+  }
+
+  // 2. Migration fallback path: Environment variables (DRONE_DEVICE_TOKENS, DRONE_TOKEN_<ID>)
+  // Only active when LEGACY_ENV_TOKENS_ENABLED is true
+  if (LEGACY_ENV_TOKENS_ENABLED) {
+    const expectedToken = getExpectedDroneToken(droneId);
+    if (expectedToken) {
+      if (constantTimeCompare(cleanToken, expectedToken)) {
+        req.authenticatedDroneId = droneId;
+        return next();
+      }
+      return res.status(401).json({
+        error: `Unauthorized: invalid device token for drone '${droneId}'.`
+      });
+    }
   }
 
   // 3. If MongoDB is ready and not found in memory/env, query DB
@@ -254,6 +288,9 @@ async function migrateDroneTokens() {
 module.exports = {
   ECOWING_OPERATOR_TOKEN,
   DETECTION_SERVICE_TOKEN,
+  LEGACY_ENV_TOKENS_ENABLED,
+  setLegacyEnvTokensEnabled,
+  getLegacyEnvTokensEnabled,
   validateOperatorTokenConfig,
   verifyOperatorToken,
   verifyServiceToken,

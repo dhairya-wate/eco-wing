@@ -185,12 +185,17 @@ class DeviceStore {
   /**
    * Synchronous check against in-memory cache/store
    */
+  getDeviceRecordSync(device_id) {
+    if (!device_id) return null;
+    return this.memoryDevices.get(String(device_id).trim()) || null;
+  }
+
   verifyDeviceTokenSync(device_id, rawToken) {
     if (!device_id || !rawToken) return false;
     const cleanId = String(device_id).trim();
     const tokenHash = Device.hashToken(rawToken);
     const dev = this.memoryDevices.get(cleanId);
-    if (!dev || dev.status !== 'active') return false;
+    if (!dev || dev.status !== 'active' || !dev.token_hash) return false;
     return constantTimeHashCompare(tokenHash, dev.token_hash);
   }
 
@@ -214,30 +219,33 @@ class DeviceStore {
   }
 
   /**
-   * List all registered devices (omits token_hash).
+   * List all registered devices (omits full token_hash and raw_token).
+   * Returns metadata only: id, device_id, name, type, status, created_at, revoked_at, fingerprint.
    */
   async listDevices() {
     if (this.isMongoReady()) {
-      const docs = await Device.find({}, { token_hash: 0 }).sort({ created_at: -1 });
+      const docs = await Device.find({}).sort({ created_at: -1 });
       return docs.map(d => ({
+        id: d.device_id,
         device_id: d.device_id,
         name: d.name,
         type: d.type,
         status: d.status,
-        last_seen: d.last_seen,
         created_at: d.created_at,
-        updated_at: d.updated_at
+        revoked_at: d.status === 'revoked' ? d.updated_at : null,
+        fingerprint: d.token_hash ? d.token_hash.substring(0, 8) : null
       }));
     }
 
     return Array.from(this.memoryDevices.values()).map(d => ({
+      id: d.device_id,
       device_id: d.device_id,
       name: d.name,
       type: d.type,
       status: d.status,
-      last_seen: d.last_seen,
       created_at: d.created_at,
-      updated_at: d.updated_at
+      revoked_at: d.status === 'revoked' ? d.updated_at : null,
+      fingerprint: d.token_hash ? d.token_hash.substring(0, 8) : null
     }));
   }
 
