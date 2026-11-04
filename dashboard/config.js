@@ -8,3 +8,4 @@ window.DASHBOARD_CONFIG = window.DASHBOARD_CONFIG || {
   },
   googleClientId: ''
 };
+

@@ -1,13 +1,23 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": null,
-  "buildCommand": null,
-  "outputDirectory": "dashboard",
   "cleanUrls": true,
   "rewrites": [
     {
       "source": "/config.js",
       "destination": "/config.js"
+    },
+    {
+      "source": "/sensor",
+      "destination": "/services/sensor/templates/index.html"
+    },
+    {
+      "source": "/mobile",
+      "destination": "/services/sensor/templates/mobile.html"
+    },
+    {
+      "source": "/static/(.*)",
+      "destination": "/services/sensor/static/$1"
     },
     {
       "source": "/(.*)",

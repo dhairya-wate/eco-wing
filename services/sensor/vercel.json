@@ -1,24 +1,26 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": null,
-  "buildCommand": null,
-  "outputDirectory": ".",
   "cleanUrls": true,
   "rewrites": [
     {
-      "source": "/mobile",
-      "destination": "/mobile.html"
+      "source": "/config.js",
+      "destination": "/config.js"
     },
     {
-      "source": "/mobile.html",
-      "destination": "/mobile.html"
+      "source": "/sensor",
+      "destination": "/templates/index.html"
+    },
+    {
+      "source": "/mobile",
+      "destination": "/templates/mobile.html"
     },
     {
       "source": "/static/(.*)",
       "destination": "/static/$1"
     },
     {
-      "source": "/",
+      "source": "/(.*)",
       "destination": "/index.html"
     }
   ]
