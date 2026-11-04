@@ -1767,8 +1767,8 @@ html:not(.authed) body{overflow:hidden}
              crossorigin="anonymous"
              alt="Live detection feed"
              style="width:100%;height:100%;object-fit:cover;display:none;"
-             onerror="this.style.display='none';document.getElementById('feedOffline').style.display='flex';"
-             onload="this.style.display='block';document.getElementById('feedOffline').style.display='none';">
+             onerror="if(!window.__phoneConnected){this.style.display='none';document.getElementById('feedOffline').style.display='flex';}"
+             onload="if(!window.__phoneConnected){this.style.display='block';document.getElementById('feedOffline').style.display='none';}">
         <!-- Fallback shown when stream is offline -->
         <div id="feedOffline" class="feed-placeholder">
           <div style="width:48px;height:48px;border-radius:50%;background:rgba(16,185,129,0.15);display:flex;align-items:center;justify-content:center;margin-bottom:10px;color:var(--primary);font-size:24px;">
@@ -1779,12 +1779,9 @@ html:not(.authed) body{overflow:hidden}
             Open the Detection scanner on your phone to stream live AI waste detection automatically.
           </div>
           <div style="display:flex;gap:10px;flex-wrap:wrap;justify-content:center;">
-            <button class="ctrl-btn success" id="feedConnectPhoneBtn" style="font-size:12px;padding:8px 16px;display:inline-flex;align-items:center;gap:6px;cursor:pointer">
-              <i class="ti ti-device-mobile"></i> Connect Phone (QR / Code)
-            </button>
-            <button class="ctrl-btn" id="feedManageDevicesBtn" style="font-size:12px;padding:8px 16px;display:inline-flex;align-items:center;gap:6px;background:var(--surface-2);color:var(--text-primary);border:1px solid var(--border-color);cursor:pointer">
-              <i class="ti ti-devices"></i> Manage Devices
-            </button>
+            <a href="/mobile" target="_blank" class="ctrl-btn success" style="text-decoration:none;font-size:13px;padding:10px 20px;display:inline-flex;align-items:center;gap:8px;font-weight:700;">
+              <i class="ti ti-device-mobile"></i> Open Phone Scanner (/mobile)
+            </a>
           </div>
         </div>
       </div>
@@ -2969,6 +2966,8 @@ function switchTab(button, tabId) {
       try {
         const dc = document.createElement('canvas');
         dc.width = 2; dc.height = 2;
+        const dctx = dc.getContext('2d');
+        if (dctx) { dctx.fillStyle = '#000'; dctx.fillRect(0, 0, 2, 2); }
         dummyStream = dc.captureStream ? dc.captureStream(1) : null;
       } catch (e) {}
 
@@ -2980,6 +2979,7 @@ function switchTab(button, tabId) {
 
         call.on('stream', remoteStream => {
           phoneConnected = true;
+          window.__phoneConnected = true;
           phoneCall = call;
 
           const vid = document.getElementById('liveFeedVideo');
@@ -3018,6 +3018,7 @@ function switchTab(button, tabId) {
 
         call.on('close', () => {
           phoneConnected = false;
+          window.__phoneConnected = false;
           const vid = document.getElementById('liveFeedVideo');
           if (vid) vid.style.display = 'none';
           const off = document.getElementById('feedOffline');
@@ -3028,6 +3029,7 @@ function switchTab(button, tabId) {
 
         call.on('error', () => {
           phoneConnected = false;
+          window.__phoneConnected = false;
         });
 
         // Data connection for real-time detections
@@ -3145,7 +3147,7 @@ socket.on('stats_update', updateAllStats);
 // Live Detection Telemetry & Video Feed from Detection System
 let lastDetectionTime = 0;
 async function pollDetectionBackend() {
-  if (!API_BASE) return;
+  if (!API_BASE || phoneConnected) return;
   try {
     const res = await fetch(API_BASE + '/api/detections');
     if (!res.ok) return;
@@ -4622,12 +4624,30 @@ window.addEventListener('load',function(){try{
     const timerEl = $('pcmTimer');
     const qrImg = $('pcmQrImg');
     const linkEl = $('pcmMobileLink');
+    const qrContainer = $('pcmQrContainer');
+    const qrWarning = $('pcmQrWarning');
 
-    if (codeEl) codeEl.textContent = '...';
-    if (timerEl) timerEl.textContent = '05:00';
+    const directMobileUrl = (typeof window !== 'undefined' && window.location && window.location.origin)
+      ? (window.location.origin + '/mobile')
+      : '/mobile';
+
+    if (qrContainer) qrContainer.style.display = 'flex';
+    if (qrWarning) qrWarning.style.display = 'none';
+    if (qrImg) {
+      qrImg.src = 'https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=' + encodeURIComponent(directMobileUrl);
+    }
+    if (linkEl) {
+      linkEl.style.display = 'inline-block';
+      linkEl.href = directMobileUrl;
+      linkEl.textContent = directMobileUrl + ' ↗';
+    }
+    if (codeEl) codeEl.textContent = 'DIRECT';
+    if (timerEl) timerEl.textContent = 'READY';
 
     try {
-      const res = await fetch(getApiBase() + '/api/mobile/pairing_code', {
+      const apiBase = getApiBase();
+      if (!apiBase) return;
+      const res = await fetch(apiBase + '/api/mobile/pairing_code', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -4635,75 +4655,33 @@ window.addEventListener('load',function(){try{
         },
         body: JSON.stringify({})
       });
+      if (!res.ok) return;
       const data = await res.json();
-      if (!res.ok || !data.code) {
-        throw new Error(data.error || 'Failed to create pairing code');
-      }
-
-      if (codeEl) codeEl.textContent = data.code;
-
-
-
-      const qrContainer = $('pcmQrContainer');
-
-      const qrWarning = $('pcmQrWarning');
-
-
-
-      if (data.mobile_url) {
-
-        if (qrContainer) qrContainer.style.display = 'flex';
-
-        if (qrWarning) qrWarning.style.display = 'none';
-
-        if (qrImg) {
-
+      if (data && data.code && codeEl) {
+        codeEl.textContent = data.code;
+        if (data.mobile_url && qrImg) {
           qrImg.src = 'https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=' + encodeURIComponent(data.mobile_url);
-
         }
-
-        if (linkEl) {
-
-          linkEl.style.display = 'inline-block';
-
+        if (data.mobile_url && linkEl) {
           linkEl.href = data.mobile_url;
-
           linkEl.textContent = data.mobile_url + ' ↗';
-
         }
-
-      } else {
-
-        if (qrContainer) qrContainer.style.display = 'none';
-
-        if (qrWarning) qrWarning.style.display = 'block';
-
-        if (linkEl) linkEl.style.display = 'none';
-
-      }
-
-      // Countdown
-      if (pairingCountdownTimer) clearInterval(pairingCountdownTimer);
-      const ttl = data.expires_in || 300;
-      pairingExpiryTime = Date.now() + ttl * 1000;
-
-      pairingCountdownTimer = setInterval(() => {
-        const remaining = Math.max(0, Math.floor((pairingExpiryTime - Date.now()) / 1000));
-        if (timerEl) {
-          timerEl.textContent = formatTime(remaining);
-          if (remaining <= 0) {
-            timerEl.textContent = 'EXPIRED';
-            timerEl.style.color = '#ef4444';
-            clearInterval(pairingCountdownTimer);
-          } else {
-            timerEl.style.color = '#f59e0b';
+        if (pairingCountdownTimer) clearInterval(pairingCountdownTimer);
+        const ttl = data.expires_in || 300;
+        pairingExpiryTime = Date.now() + ttl * 1000;
+        pairingCountdownTimer = setInterval(() => {
+          const remaining = Math.max(0, Math.floor((pairingExpiryTime - Date.now()) / 1000));
+          if (timerEl) {
+            timerEl.textContent = formatTime(remaining);
+            if (remaining <= 0) {
+              timerEl.textContent = 'DIRECT P2P READY';
+              clearInterval(pairingCountdownTimer);
+            }
           }
-        }
-      }, 1000);
-
-    } catch (err) {
-      if (codeEl) codeEl.textContent = 'ERROR';
-      if (window.toast) toast('Error generating code: ' + err.message, 'err', 'ti-alert-circle');
+        }, 1000);
+      }
+    } catch (e) {
+      // Backend not running; zero-config direct WebRTC remains active
     }
   }
 
