@@ -6,6 +6,8 @@ const path = require('path');
 test('Dashboard Single Source of Truth & Zero-Drift Guarantee', async (t) => {
   const canonicalPath = path.resolve(__dirname, '../../index.html');
   const dashboardPath = path.resolve(__dirname, '../../../../dashboard/index.html');
+  const rootPath = path.resolve(__dirname, '../../../../index.html');
+  const sensorDashboardPath = path.resolve(__dirname, '../../../sensor/index.html');
   const legacyScriptPath = path.resolve(__dirname, '../../../../update_dashboard.py');
 
   await t.test('canonical dashboard file services/command-center/index.html exists and is non-empty', () => {
@@ -14,11 +16,22 @@ test('Dashboard Single Source of Truth & Zero-Drift Guarantee', async (t) => {
     assert.ok(content.length > 1000, 'Canonical index.html must be a populated HTML document');
   });
 
-  await t.test('dashboard/index.html is strictly identical to canonical services/command-center/index.html', () => {
-    assert.ok(fs.existsSync(dashboardPath), `dashboard/index.html must exist at ${dashboardPath}`);
+  await t.test('every copy of the dashboard is identical to canonical services/command-center/index.html', () => {
     const canonicalContent = fs.readFileSync(canonicalPath, 'utf8');
-    const dashboardContent = fs.readFileSync(dashboardPath, 'utf8');
-    assert.equal(dashboardContent, canonicalContent, 'dashboard/index.html must be identical to canonical index.html');
+
+    // dashboard/index.html
+    assert.ok(fs.existsSync(dashboardPath), `dashboard/index.html must exist at ${dashboardPath}`);
+    assert.equal(fs.readFileSync(dashboardPath, 'utf8'), canonicalContent, 'dashboard/index.html must be identical to canonical index.html');
+
+    // root index.html (if present for static deployments)
+    if (fs.existsSync(rootPath)) {
+      assert.equal(fs.readFileSync(rootPath, 'utf8'), canonicalContent, 'root index.html must be identical to canonical index.html');
+    }
+
+    // services/sensor/index.html
+    if (fs.existsSync(sensorDashboardPath)) {
+      assert.equal(fs.readFileSync(sensorDashboardPath, 'utf8'), canonicalContent, 'services/sensor/index.html must be identical to canonical index.html');
+    }
   });
 
   await t.test('update_dashboard.py is completely deleted and not present in the workspace', () => {
@@ -37,5 +50,37 @@ test('Dashboard Single Source of Truth & Zero-Drift Guarantee', async (t) => {
       false,
       'Canonical index.html must not contain /api/device/command'
     );
+  });
+
+  await t.test('no *.vercel.app URL appears in any HTML or JS file served to phone or dashboard', () => {
+    const phoneFacingAllowlist = []; // Strict empty allowlist for phone-facing and dashboard assets
+
+    const repoRoot = path.resolve(__dirname, '../../../../');
+    const filesToCheck = [
+      canonicalPath,
+      dashboardPath,
+      rootPath,
+      sensorDashboardPath,
+      path.resolve(repoRoot, 'services/sensor/templates/mobile.html'),
+      path.resolve(repoRoot, 'services/sensor/templates/index.html'),
+      path.resolve(repoRoot, 'config.js'),
+      path.resolve(repoRoot, 'dashboard/config.js'),
+      path.resolve(repoRoot, 'services/sensor/config.js'),
+      path.resolve(repoRoot, 'services/sensor/static/js/main.js')
+    ];
+
+    const vercelRegex = /https?:\/\/[a-zA-Z0-9.\-_]+\.vercel\.app[a-zA-Z0-9/\-_]*/gi;
+
+    for (const filePath of filesToCheck) {
+      if (!fs.existsSync(filePath)) continue;
+      const content = fs.readFileSync(filePath, 'utf8');
+      const matches = content.match(vercelRegex) || [];
+      const unallowed = matches.filter(url => !phoneFacingAllowlist.includes(url));
+      assert.equal(
+        unallowed.length,
+        0,
+        `File ${path.relative(repoRoot, filePath)} contains unallowed vercel.app URLs: ${unallowed.join(', ')}`
+      );
+    }
   });
 });

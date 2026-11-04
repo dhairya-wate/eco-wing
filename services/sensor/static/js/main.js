@@ -60,11 +60,12 @@ document.addEventListener("DOMContentLoaded", () => {
   loadAIModel();
 
   // Backend URL handling
-  const isVercel = window.location.hostname.includes("vercel.app");
+  const serverConfig = window.DETECTION_CONFIG || window.DASHBOARD_CONFIG || {};
+  const isStandaloneMode = Boolean(serverConfig.standalone);
   let backendUrl = localStorage.getItem("ecowing_backend_url") || "";
   
   if (!backendUrl) {
-    if (!isVercel) {
+    if (!isStandaloneMode) {
       backendUrl = window.location.origin;
     } else {
       backendUrl = "";
@@ -464,7 +465,7 @@ document.addEventListener("DOMContentLoaded", () => {
       codeReact.textContent = `<img src="${streamUrl}" alt="EcoWing Stream" className="w-full rounded-2xl" />`;
       codeJs.textContent = `fetch("${apiUrl}").then(r => r.json()).then(d => console.log(d.data.items));`;
     } catch (err) {
-      if (isVercel && !backendUrl) {
+      if (isStandaloneMode || !backendUrl) {
         bannerStatusTitle.textContent = "On-Device AI Active";
         bannerStatusSub.textContent = "Using in-browser AI engine (click 'Start Camera' to begin)";
         streamStatusText.textContent = "LOCAL AI READY";

@@ -1,6 +1,6 @@
 // EcoWing Command Center Dashboard Configuration
 window.DASHBOARD_CONFIG = Object.assign({
-  apiBase: 'https://detection-system-flax.vercel.app',
+  apiBase: (typeof window !== 'undefined' && window.location && window.location.origin) ? window.location.origin : '',
   demoLogin: true,
   demoAccounts: {
     admin: { password: 'password123', name: 'Fleet Administrator', role: 'admin' },
