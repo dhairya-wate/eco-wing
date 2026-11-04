@@ -1,12 +1,20 @@
 # Ignore Python serverless build on Vercel to prevent [LAMBDA_SIZE_EXCEEDED]
 requirements.txt
+requirements.lock
+pyproject.toml
+pytest.ini
+Dockerfile
+data/
 yolo26n.pt
 *.pt
 __pycache__
 *.pyc
+*.py
+src/
+tests/
+test_samples/
 
 # Local scripts
 run.py
 start_tunnel.bat
 generate_samples.py
-

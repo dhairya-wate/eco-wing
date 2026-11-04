@@ -1,0 +1,16 @@
+# Ignore heavy binaries and Python runtime from Vercel deployment
+models/
+*.pt
+data/
+outbox.db
+deploy/
+tests/
+tools/
+dashboard/
+.git
+.github
+*.py
+__pycache__
+*.pyc
+requirements.txt
+requirements.lock

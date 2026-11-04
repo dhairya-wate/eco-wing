@@ -1,0 +1,23 @@
+{
+  "buildCommand": null,
+  "outputDirectory": "services/sensor",
+  "cleanUrls": true,
+  "rewrites": [
+    {
+      "source": "/mobile",
+      "destination": "/templates/mobile.html"
+    },
+    {
+      "source": "/mobile.html",
+      "destination": "/templates/mobile.html"
+    },
+    {
+      "source": "/static/(.*)",
+      "destination": "/static/$1"
+    },
+    {
+      "source": "/",
+      "destination": "/templates/index.html"
+    }
+  ]
+}

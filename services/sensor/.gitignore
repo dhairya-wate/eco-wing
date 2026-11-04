@@ -49,3 +49,5 @@ data/
 
 
 .pytest_cache/
+
+.vercel

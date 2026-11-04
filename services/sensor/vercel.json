@@ -1,9 +1,15 @@
 {
+  "buildCommand": null,
+  "outputDirectory": ".",
   "cleanUrls": true,
   "rewrites": [
     {
       "source": "/mobile",
-      "destination": "/mobile.html"
+      "destination": "/templates/mobile.html"
+    },
+    {
+      "source": "/mobile.html",
+      "destination": "/templates/mobile.html"
     },
     {
       "source": "/static/(.*)",
@@ -11,7 +17,7 @@
     },
     {
       "source": "/",
-      "destination": "/index.html"
+      "destination": "/templates/index.html"
     }
   ]
 }
