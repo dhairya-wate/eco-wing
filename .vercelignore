@@ -1,4 +1,4 @@
-# Ignore heavy binaries and Python runtime from Vercel deployment
+# Ignore heavy binaries, Python runtime, and services from Vercel deployment
 models/
 *.pt
 data/
@@ -6,7 +6,7 @@ outbox.db
 deploy/
 tests/
 tools/
-dashboard/
+services/
 .git
 .github
 *.py
