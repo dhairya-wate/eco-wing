@@ -8,6 +8,14 @@
       "destination": "/config.js"
     },
     {
+      "source": "/video_feed",
+      "destination": "https://ecowing-detection-system.onrender.com/video_feed"
+    },
+    {
+      "source": "/api/detections",
+      "destination": "https://ecowing-detection-system.onrender.com/api/detections"
+    },
+    {
       "source": "/sensor",
       "destination": "/services/sensor/templates/index.html"
     },
