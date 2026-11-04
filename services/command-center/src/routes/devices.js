@@ -118,6 +118,20 @@ router.post('/devices/:id/revoke', verifyOperatorToken, async (req, res) => {
 });
 
 /**
+ * GET /api/mobile/config
+ * Returns public configuration for mobile pairing.
+ * Builds URLs exclusively from ECOWING_PUBLIC_URL.
+ */
+router.get('/mobile/config', (req, res) => {
+  const ecowingPublicUrl = process.env.ECOWING_PUBLIC_URL ? process.env.ECOWING_PUBLIC_URL.replace(/\/+$/, '') : null;
+  res.json({
+    success: true,
+    ecowing_public_url: ecowingPublicUrl,
+    mobile_path: '/mobile'
+  });
+});
+
+/**
  * POST /api/mobile/pairing_code
  * Generates single-use 6-character pairing code with 5-minute TTL.
  * Protected: Operator only
@@ -145,12 +159,16 @@ router.post('/mobile/pairing_code', verifyOperatorToken, async (req, res) => {
     const ttlSeconds = Number(req.body.ttl_seconds) || 300;
     const pairing = await deviceStore.createPairingCode(deviceId, ttlSeconds);
 
+    const ecowingPublicUrl = process.env.ECOWING_PUBLIC_URL ? process.env.ECOWING_PUBLIC_URL.replace(/\/+$/, '') : null;
+    const mobileUrl = ecowingPublicUrl ? `${ecowingPublicUrl}/mobile?code=${pairing.code}` : null;
+
     const io = req.app.get('io');
     if (io) {
       io.emit('pairing_code_generated', {
         code: pairing.code,
         device_id: pairing.device_id,
-        expires_at: pairing.expires_at
+        expires_at: pairing.expires_at,
+        mobile_url: mobileUrl
       });
     }
 
@@ -159,7 +177,8 @@ router.post('/mobile/pairing_code', verifyOperatorToken, async (req, res) => {
       code: pairing.code,
       device_id: pairing.device_id,
       expires_in: pairing.expires_in,
-      expires_at: pairing.expires_at
+      expires_at: pairing.expires_at,
+      mobile_url: mobileUrl
     });
   } catch (err) {
     console.error('Error in POST /api/mobile/pairing_code:', err);
@@ -270,87 +289,5 @@ async function handleRevokeSession(req, res) {
     res.status(400).json({ error: err.message });
   }
 }
-
-/**
- * POST /api/device/command
- * Send commands to a phone or drone using the canonical command schema
- * Verbs:
- *   - Drone: start, hold, rth, land, estop, photo, zoom
- *   - Phone: pause_stream, resume_stream, set_confidence (params: { confidence: [0.0, 1.0] })
- * Protected: Operator only
- */
-router.post('/device/command', verifyOperatorToken, async (req, res) => {
-  try {
-    const { drone_id, target = 'drone', command, params, ack_timeout_seconds } = req.body;
-    if (!drone_id) {
-      return res.status(400).json({ error: "Missing required 'drone_id' or 'device_id'." });
-    }
-    if (!command) {
-      return res.status(400).json({ error: "Missing required 'command'." });
-    }
-
-    const cleanTarget = String(target).trim().toLowerCase();
-
-    // Check telemetry freshness for drone flight commands
-    if (cleanTarget === 'drone') {
-      const freshness = commandManager.checkTelemetryFreshness(drone_id, 10.0);
-      if (!freshness.fresh && !freshness.missing) {
-        return res.status(409).json({ error: freshness.error, age_seconds: freshness.age_seconds });
-      }
-    }
-
-    let cmd;
-    try {
-      cmd = commandManager.createCommand({
-        drone_id,
-        target: cleanTarget,
-        command,
-        params,
-        actor: req.body.actor || 'operator_console'
-      });
-    } catch (cmdErr) {
-      return res.status(400).json({ error: cmdErr.message });
-    }
-
-    // Transition state: requested -> sent
-    commandManager.transitionCommand(cmd.command_id, 'sent', `Dispatched to ${cleanTarget} channel`);
-
-    // Arm ACK timeout
-    const ackTimeout = Number(ack_timeout_seconds) || 5.0;
-    commandManager.armAckTimeout(cmd.command_id, ackTimeout, (timedOutCmd) => {
-      const io = req.app.get('io');
-      if (io) {
-        io.emit('command_timed_out', {
-          command_id: timedOutCmd.command_id,
-          drone_id,
-          target: cleanTarget,
-          reason: timedOutCmd.error_message
-        });
-      }
-    });
-
-    const io = req.app.get('io');
-    if (io) {
-      if (cleanTarget === 'drone') {
-        io.emit('drone_command_executed', { command: cmd.command, drone_id, command_id: cmd.command_id });
-        io.to(`drone:${drone_id}`).emit('command', { command: cmd.command, command_id: cmd.command_id });
-      } else if (cleanTarget === 'phone') {
-        io.emit('phone_command_dispatched', { command: cmd.command, device_id: drone_id, params: cmd.params, command_id: cmd.command_id });
-        io.to(`phone:${drone_id}`).emit('phone_command', { command: cmd.command, params: cmd.params, command_id: cmd.command_id });
-      }
-    }
-
-    res.json({
-      success: true,
-      message: `${cleanTarget.toUpperCase()} command dispatched: ${cmd.command}`,
-      command_id: cmd.command_id,
-      state: cmd.state,
-      command: cmd
-    });
-  } catch (err) {
-    console.error('Error in POST /api/device/command:', err);
-    res.status(500).json({ error: 'Failed to dispatch command' });
-  }
-});
 
 module.exports = router;

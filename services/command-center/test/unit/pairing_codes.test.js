@@ -150,4 +150,113 @@ test('Three-Tier Token Model: Pairing Codes (Tier 2) & Scoped Sessions (Tier 3)'
       });
     }, /must be a number between 0.0 and 1.0/);
   });
+
+  await t.test('mobile URL and QR configuration: dynamically uses ECOWING_PUBLIC_URL with no hardcoded hosts', async () => {
+    const express = require('express');
+    const http = require('http');
+    const { router: apiRouter } = require('../../src/routes/api');
+
+    const app = express();
+    app.use(express.json());
+    app.use('/api', apiRouter);
+
+    const server = http.createServer(app);
+    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const port = server.address().port;
+    const baseUrl = `http://127.0.0.1:${port}`;
+
+    try {
+      // 1. When ECOWING_PUBLIC_URL is configured
+      process.env.ECOWING_PUBLIC_URL = 'https://ecowing.example.org';
+      const confRes = await fetch(`${baseUrl}/api/mobile/config`);
+      assert.equal(confRes.status, 200);
+      const confData = await confRes.json();
+      assert.equal(confData.ecowing_public_url, 'https://ecowing.example.org');
+      assert.equal(confData.mobile_path, '/mobile');
+
+      const pairRes = await fetch(`${baseUrl}/api/mobile/pairing_code`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Operator-Token': process.env.ECOWING_OPERATOR_TOKEN
+        },
+        body: JSON.stringify({ device_id: 'phone-field-01' })
+      });
+      assert.equal(pairRes.status, 200);
+      const pairData = await pairRes.json();
+      assert.ok(pairData.code);
+      assert.equal(pairData.mobile_url, `https://ecowing.example.org/mobile?code=${pairData.code}`);
+      assert.equal(pairData.mobile_url.includes('detection-system-flax.vercel.app'), false);
+
+      // 2. When ECOWING_PUBLIC_URL is unset
+      delete process.env.ECOWING_PUBLIC_URL;
+      const unsetConfRes = await fetch(`${baseUrl}/api/mobile/config`);
+      const unsetConfData = await unsetConfRes.json();
+      assert.equal(unsetConfData.ecowing_public_url, null);
+
+      const unsetPairRes = await fetch(`${baseUrl}/api/mobile/pairing_code`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Operator-Token': process.env.ECOWING_OPERATOR_TOKEN
+        },
+        body: JSON.stringify({ device_id: 'phone-field-01' })
+      });
+      const unsetPairData = await unsetPairRes.json();
+      assert.equal(unsetPairData.mobile_url, null, 'mobile_url must be null when ECOWING_PUBLIC_URL is unset');
+
+      // 3. Unified POST /api/drone/command with target: 'phone'
+      const phoneCmdRes = await fetch(`${baseUrl}/api/drone/command`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Operator-Token': process.env.ECOWING_OPERATOR_TOKEN
+        },
+        body: JSON.stringify({
+          drone_id: 'phone-field-01',
+          target: 'phone',
+          command: 'set_confidence',
+          params: { confidence: 0.85 }
+        })
+      });
+      assert.equal(phoneCmdRes.status, 200);
+      const phoneCmdData = await phoneCmdRes.json();
+      assert.equal(phoneCmdData.success, true);
+      assert.equal(phoneCmdData.command.command, 'set_confidence');
+      assert.equal(phoneCmdData.command.params.confidence, 0.85);
+
+      // 4. Unified POST /api/drone/command: reject drone flight command sent to phone
+      const badPhoneCmdRes = await fetch(`${baseUrl}/api/drone/command`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Operator-Token': process.env.ECOWING_OPERATOR_TOKEN
+        },
+        body: JSON.stringify({
+          drone_id: 'phone-field-01',
+          target: 'phone',
+          command: 'start'
+        })
+      });
+      assert.equal(badPhoneCmdRes.status, 400);
+
+      // 5. Unified POST /api/drone/command: reject phone command sent to drone
+      const badDroneCmdRes = await fetch(`${baseUrl}/api/drone/command`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Operator-Token': process.env.ECOWING_OPERATOR_TOKEN
+        },
+        body: JSON.stringify({
+          drone_id: 'drone-01',
+          target: 'drone',
+          command: 'pause_stream'
+        })
+      });
+      assert.equal(badDroneCmdRes.status, 400);
+
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+    }
+  });
 });
