@@ -2380,16 +2380,26 @@ html:not(.authed) body{overflow:hidden}
       </div>
 
       <!-- QR Code & Link -->
-      <div style="display:flex;flex-direction:column;align-items:center;margin:1rem 0">
-        <div id="pcmQrContainer" style="width:180px;height:180px;background:#fff;padding:8px;border-radius:8px;box-shadow:var(--shadow-sm);display:flex;align-items:center;justify-content:center">
-          <img id="pcmQrImg" alt="QR Code" style="width:100%;height:100%;object-fit:contain" src="">
-        </div>
-        <div id="pcmQrWarning" style="display:none;background:rgba(245,158,11,0.12);border:1px solid rgba(245,158,11,0.35);color:#d97706;border-radius:8px;padding:12px;font-size:12px;text-align:left;line-height:1.4;max-width:380px;">
-          <strong><i class="ti ti-alert-triangle"></i> ECOWING_PUBLIC_URL not configured</strong><br>
-          Please configure <code>ECOWING_PUBLIC_URL</code> (e.g. <code>https://your-domain.com</code>) on the EcoWing server to generate QR codes for mobile streaming.
-        </div>
-        <a id="pcmMobileLink" href="#" target="_blank" style="display:none;margin-top:10px;font-size:12px;color:var(--primary);word-break:break-all;text-decoration:none">
-        </a>
+      <div style="display:flex;flex-direction:column;align-items:center;margin:1rem 0">
+
+        <div id="pcmQrContainer" style="width:180px;height:180px;background:#fff;padding:8px;border-radius:8px;box-shadow:var(--shadow-sm);display:flex;align-items:center;justify-content:center">
+
+          <img id="pcmQrImg" alt="QR Code" style="width:100%;height:100%;object-fit:contain" src="">
+
+        </div>
+
+        <div id="pcmQrWarning" style="display:none;background:rgba(245,158,11,0.12);border:1px solid rgba(245,158,11,0.35);color:#d97706;border-radius:8px;padding:12px;font-size:12px;text-align:left;line-height:1.4;max-width:380px;">
+
+          <strong><i class="ti ti-alert-triangle"></i> ECOWING_PUBLIC_URL not configured</strong><br>
+
+          Please configure <code>ECOWING_PUBLIC_URL</code> (e.g. <code>https://your-domain.com</code>) on the EcoWing server to generate QR codes for mobile streaming.
+
+        </div>
+
+        <a id="pcmMobileLink" href="#" target="_blank" style="display:none;margin-top:10px;font-size:12px;color:var(--primary);word-break:break-all;text-decoration:none">
+
+        </a>
+
       </div>
 
       <!-- Active Connected Sessions -->
@@ -3132,6 +3142,69 @@ socket.on('new_detection', (event) => {
 
 socket.on('stats_update', updateAllStats);
 
+// Live Detection Telemetry & Video Feed from Detection System
+let lastDetectionTime = 0;
+async function pollDetectionBackend() {
+  if (!API_BASE) return;
+  try {
+    const res = await fetch(API_BASE + '/api/detections');
+    if (!res.ok) return;
+    const json = await res.json();
+    if (json.status !== 'success' || !json.data) return;
+
+    const data = json.data;
+    const isLive = !json.stale;
+
+    // Update live status indicator
+    if (liveStatusEl) {
+      if (json.phone_connected) {
+        liveStatusEl.innerHTML = '<i class="ti ti-point-filled"></i> Phone Camera Active';
+        liveStatusEl.style.color = 'var(--success)';
+      } else if (isLive) {
+        liveStatusEl.innerHTML = '<i class="ti ti-point-filled"></i> AI Model Active';
+        liveStatusEl.style.color = 'var(--success)';
+      }
+    }
+
+    const liveLabel = document.getElementById('liveLabel');
+    if (liveLabel) liveLabel.textContent = 'LIVE';
+    const liveDot = document.getElementById('liveDot');
+    if (liveDot) liveDot.style.background = 'var(--success)';
+    const feedOffline = document.getElementById('feedOffline');
+    if (feedOffline) feedOffline.style.display = 'none';
+    const feedImg = document.getElementById('liveFeedImg');
+    if (feedImg && feedImg.style.display === 'none') feedImg.style.display = 'block';
+
+    // Ingest detected waste items into dashboard feed table
+    if (data.items && data.items.length > 0 && json.timestamp !== lastDetectionTime) {
+      lastDetectionTime = json.timestamp;
+      if (!feedPlaceholderRemoved && feedBody) {
+        feedBody.innerHTML = '';
+        feedPlaceholderRemoved = true;
+      }
+      data.items.forEach(it => {
+        prependRow({
+          event_id: Math.floor(Math.random() * 90000) + 10000,
+          drone_id: json.phone_connected ? 'Mobile Phone' : 'EcoWing AI',
+          class_name: it.name || it.raw_class,
+          material_type: it.category || (it.recyclable === 'yes' ? 'Recyclable' : 'Non-Recyclable'),
+          confidence: it.confidence || 0.85,
+          center: it.bbox ? [(it.bbox[0] + it.bbox[2])/2, (it.bbox[1] + it.bbox[3])/2] : [320, 240],
+          timestamp: new Date().toLocaleTimeString()
+        }, true);
+      });
+
+      const box = document.getElementById('liveFeedBox');
+      if (box) {
+        box.style.boxShadow = '0 0 0 3px var(--success)';
+        setTimeout(() => { if (box) box.style.boxShadow = ''; }, 600);
+      }
+    }
+  } catch (err) {}
+}
+setInterval(pollDetectionBackend, 1500);
+setTimeout(pollDetectionBackend, 600);
+
 // ─── Stats update — wires every metric card ───────────────────────────────────
 function updateAllStats(stats) {
   const total   = stats.total_unique ?? 0;
@@ -3640,7 +3713,7 @@ fetch(API_BASE + '/api/events').then(r => r.json()).then(events => {
       body: JSON.stringify({ drone_id: k.n })
     }).catch(()=>{});
     D.splice(i,1);if(cur>=D.length)cur=Math.max(0,D.length-1);else if(i<cur)cur--;applyFeed();render();toast(k.n+' disconnected','warn','ti-plug-off')});
-  function applyFeed(){const im=$('liveFeedImg'),src=(d()&&d().feed)||'/video_feed';if(im.getAttribute('src')!==src)im.src=src}
+  function applyFeed(){const im=$('liveFeedImg');let src=(d()&&d().feed)||'/video_feed';if(typeof API_BASE!=='undefined'&&API_BASE&&src.startsWith('/')){src=API_BASE+src;}if(im&&im.getAttribute('src')!==src)im.src=src;}
   const ADDR={wifi:['IP address','192.0.2.10'],socket:['WebSocket Host','ws://localhost:3000'],mavlink:['MAVLink endpoint','udp://0.0.0.0:14550'],rtsp:['Stream address','rtsp://192.0.2.10:554/live'],serial:['Serial port','/dev/ttyUSB0 or COM3']};
   const adOpen=()=>{
     ['adName','adAddr','adStream'].forEach(i=>$(i).value='');
@@ -4567,26 +4640,46 @@ window.addEventListener('load',function(){try{
         throw new Error(data.error || 'Failed to create pairing code');
       }
 
-      if (codeEl) codeEl.textContent = data.code;
-
-      const qrContainer = $('pcmQrContainer');
-      const qrWarning = $('pcmQrWarning');
-
-      if (data.mobile_url) {
-        if (qrContainer) qrContainer.style.display = 'flex';
-        if (qrWarning) qrWarning.style.display = 'none';
-        if (qrImg) {
-          qrImg.src = 'https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=' + encodeURIComponent(data.mobile_url);
-        }
-        if (linkEl) {
-          linkEl.style.display = 'inline-block';
-          linkEl.href = data.mobile_url;
-          linkEl.textContent = data.mobile_url + ' ↗';
-        }
-      } else {
-        if (qrContainer) qrContainer.style.display = 'none';
-        if (qrWarning) qrWarning.style.display = 'block';
-        if (linkEl) linkEl.style.display = 'none';
+      if (codeEl) codeEl.textContent = data.code;
+
+
+
+      const qrContainer = $('pcmQrContainer');
+
+      const qrWarning = $('pcmQrWarning');
+
+
+
+      if (data.mobile_url) {
+
+        if (qrContainer) qrContainer.style.display = 'flex';
+
+        if (qrWarning) qrWarning.style.display = 'none';
+
+        if (qrImg) {
+
+          qrImg.src = 'https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=' + encodeURIComponent(data.mobile_url);
+
+        }
+
+        if (linkEl) {
+
+          linkEl.style.display = 'inline-block';
+
+          linkEl.href = data.mobile_url;
+
+          linkEl.textContent = data.mobile_url + ' ↗';
+
+        }
+
+      } else {
+
+        if (qrContainer) qrContainer.style.display = 'none';
+
+        if (qrWarning) qrWarning.style.display = 'block';
+
+        if (linkEl) linkEl.style.display = 'none';
+
       }
 
       // Countdown
