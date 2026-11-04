@@ -1685,10 +1685,6 @@ html:not(.authed) body{overflow:hidden}
       </div>
     </div>
     <div class="header-right">
-      <a href="https://detection-system-flax.vercel.app/" target="_blank" class="header-btn" style="text-decoration:none;display:inline-flex;align-items:center;gap:6px;padding:5px 12px;background:rgba(16,185,129,0.12);border:1px solid rgba(16,185,129,0.3);color:#10b981;font-weight:700;font-size:11.5px;border-radius:20px;margin-right:8px;" title="Open Live AI Waste Detection System">
-        <span style="width:7px;height:7px;border-radius:50%;background:#10b981;box-shadow:0 0 8px #10b981;display:inline-block;"></span>
-        <span>AI Detection Console ↗</span>
-      </a>
       <button class="header-btn" id="hdrConnectPhoneBtn" style="display:inline-flex;align-items:center;gap:6px;padding:5px 12px;background:rgba(16,185,129,0.15);border:1px solid rgba(16,185,129,0.4);color:var(--primary);font-weight:700;font-size:11.5px;border-radius:20px;margin-right:6px;cursor:pointer" title="Connect mobile phone camera broadcaster">
         <i class="ti ti-device-mobile"></i>
         <span>Connect Phone</span>
@@ -1783,12 +1779,12 @@ html:not(.authed) body{overflow:hidden}
             Open the Detection scanner on your phone to stream live AI waste detection automatically.
           </div>
           <div style="display:flex;gap:10px;flex-wrap:wrap;justify-content:center;">
-            <a href="https://detection-system-flax.vercel.app/mobile" target="_blank" class="ctrl-btn success" style="text-decoration:none;font-size:12px;padding:8px 16px;display:inline-flex;align-items:center;gap:6px">
-              <i class="ti ti-device-mobile"></i> Open Phone Scanner
-            </a>
-            <a href="https://detection-system-flax.vercel.app/" target="_blank" class="ctrl-btn" style="text-decoration:none;font-size:12px;padding:8px 16px;display:inline-flex;align-items:center;gap:6px;background:var(--surface-2);color:var(--text-primary);border:1px solid var(--border-color)">
-              <i class="ti ti-scan"></i> Open AI Web Console ↗
-            </a>
+            <button class="ctrl-btn success" id="feedConnectPhoneBtn" style="font-size:12px;padding:8px 16px;display:inline-flex;align-items:center;gap:6px;cursor:pointer">
+              <i class="ti ti-device-mobile"></i> Connect Phone (QR / Code)
+            </button>
+            <button class="ctrl-btn" id="feedManageDevicesBtn" style="font-size:12px;padding:8px 16px;display:inline-flex;align-items:center;gap:6px;background:var(--surface-2);color:var(--text-primary);border:1px solid var(--border-color);cursor:pointer">
+              <i class="ti ti-devices"></i> Manage Devices
+            </button>
           </div>
         </div>
       </div>
@@ -2384,13 +2380,16 @@ html:not(.authed) body{overflow:hidden}
       </div>
 
       <!-- QR Code & Link -->
-      <div style="display:flex;flex-direction:column;align-items:center;margin:1rem 0">
-        <div id="pcmQrContainer" style="width:180px;height:180px;background:#fff;padding:8px;border-radius:8px;box-shadow:var(--shadow-sm);display:flex;align-items:center;justify-content:center">
-          <img id="pcmQrImg" alt="QR Code" style="width:100%;height:100%;object-fit:contain" src="">
-        </div>
-        <a id="pcmMobileLink" href="#" target="_blank" style="margin-top:10px;font-size:12px;color:var(--primary);word-break:break-all;text-decoration:none">
-          Open https://detection-system-flax.vercel.app/mobile ↗
-        </a>
+      <div style="display:flex;flex-direction:column;align-items:center;margin:1rem 0">
+        <div id="pcmQrContainer" style="width:180px;height:180px;background:#fff;padding:8px;border-radius:8px;box-shadow:var(--shadow-sm);display:flex;align-items:center;justify-content:center">
+          <img id="pcmQrImg" alt="QR Code" style="width:100%;height:100%;object-fit:contain" src="">
+        </div>
+        <div id="pcmQrWarning" style="display:none;background:rgba(245,158,11,0.12);border:1px solid rgba(245,158,11,0.35);color:#d97706;border-radius:8px;padding:12px;font-size:12px;text-align:left;line-height:1.4;max-width:380px;">
+          <strong><i class="ti ti-alert-triangle"></i> ECOWING_PUBLIC_URL not configured</strong><br>
+          Please configure <code>ECOWING_PUBLIC_URL</code> (e.g. <code>https://your-domain.com</code>) on the EcoWing server to generate QR codes for mobile streaming.
+        </div>
+        <a id="pcmMobileLink" href="#" target="_blank" style="display:none;margin-top:10px;font-size:12px;color:var(--primary);word-break:break-all;text-decoration:none">
+        </a>
       </div>
 
       <!-- Active Connected Sessions -->
@@ -4568,17 +4567,26 @@ window.addEventListener('load',function(){try{
         throw new Error(data.error || 'Failed to create pairing code');
       }
 
-      if (codeEl) codeEl.textContent = data.code;
-      const mobileBase = 'https://detection-system-flax.vercel.app/mobile';
-      const fullUrl = mobileBase + '?code=' + encodeURIComponent(data.code);
-
-      if (linkEl) {
-        linkEl.href = fullUrl;
-        linkEl.textContent = fullUrl + ' ↗';
-      }
-
-      if (qrImg) {
-        qrImg.src = 'https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=' + encodeURIComponent(fullUrl);
+      if (codeEl) codeEl.textContent = data.code;
+
+      const qrContainer = $('pcmQrContainer');
+      const qrWarning = $('pcmQrWarning');
+
+      if (data.mobile_url) {
+        if (qrContainer) qrContainer.style.display = 'flex';
+        if (qrWarning) qrWarning.style.display = 'none';
+        if (qrImg) {
+          qrImg.src = 'https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=' + encodeURIComponent(data.mobile_url);
+        }
+        if (linkEl) {
+          linkEl.style.display = 'inline-block';
+          linkEl.href = data.mobile_url;
+          linkEl.textContent = data.mobile_url + ' ↗';
+        }
+      } else {
+        if (qrContainer) qrContainer.style.display = 'none';
+        if (qrWarning) qrWarning.style.display = 'block';
+        if (linkEl) linkEl.style.display = 'none';
       }
 
       // Countdown
@@ -4853,7 +4861,7 @@ window.addEventListener('load',function(){try{
       const sessData = await sessRes.json();
       const phoneId = (sessData.sessions && sessData.sessions[0]) ? sessData.sessions[0].device_id : 'phone-01';
 
-      const res = await fetch(getApiBase() + '/api/device/command', {
+      const res = await fetch(getApiBase() + '/api/drone/command', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
