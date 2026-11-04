@@ -1,7 +1,11 @@
 const crypto = require('crypto');
+const { deviceStore } = require('../services/deviceStore');
 
 // Security: Operator authentication for drone control & registration
 const ECOWING_OPERATOR_TOKEN = (process.env.ECOWING_OPERATOR_TOKEN || process.env.OPERATOR_TOKEN || '').trim();
+
+// Internal service-to-service token for detection service exchange
+const DETECTION_SERVICE_TOKEN = (process.env.DETECTION_SERVICE_TOKEN || process.env.ECOWING_SERVICE_TOKEN || 'service_token_detection_system_sec_key_32_chars').trim();
 
 function validateOperatorTokenConfig(token) {
   if (!token) {
@@ -89,10 +93,35 @@ function getExpectedDroneToken(droneId) {
   return null;
 }
 
+function verifyServiceToken(req, res, next) {
+  const token = req.headers['x-service-token'] ||
+    (req.headers['authorization']?.startsWith('Bearer ') ? req.headers['authorization'].substring(7).trim() : null);
+
+  const opToken = req.headers['x-operator-token'];
+  if (opToken && constantTimeCompare(String(opToken).trim(), ECOWING_OPERATOR_TOKEN)) {
+    return next();
+  }
+
+  if (!token) {
+    return res.status(401).json({
+      error: "Unauthorized: missing service token. Provide 'X-Service-Token' header."
+    });
+  }
+
+  if (!constantTimeCompare(String(token).trim(), DETECTION_SERVICE_TOKEN)) {
+    return res.status(401).json({
+      error: "Unauthorized: invalid service token."
+    });
+  }
+
+  next();
+}
+
 /**
- * Middleware: Enforces per-drone device token on ingestion routes.
- * Uses constant-time comparison and environment-variable storage only.
- * Rejects missing or mismatched tokens, preventing Drone A from impersonating Drone B.
+ * Middleware: Enforces per-drone/device token on ingestion routes.
+ * Checks new DeviceStore (MongoDB/hashed token) with fallback
+ * to legacy environment variable tokens for zero-downtime migration.
+ * Rejects missing or mismatched tokens, preventing Device A from impersonating Device B.
  */
 function verifyDroneToken(req, res, next) {
   const droneId = req.body?.drone_id || req.headers['x-drone-id'] || (req.query && req.query.drone_id);
@@ -118,28 +147,118 @@ function verifyDroneToken(req, res, next) {
     });
   }
 
-  const expectedToken = getExpectedDroneToken(droneId);
-  if (!expectedToken) {
-    return res.status(401).json({
-      error: `Unauthorized: no device token configured for drone '${droneId}'.`
-    });
+  const cleanToken = String(token).trim();
+
+  // 1. Fast synchronous check against in-memory DeviceStore
+  if (deviceStore && typeof deviceStore.verifyDeviceTokenSync === 'function') {
+    if (deviceStore.verifyDeviceTokenSync(droneId, cleanToken)) {
+      req.authenticatedDroneId = droneId;
+      return next();
+    }
   }
 
-  if (!constantTimeCompare(String(token).trim(), expectedToken)) {
+  // 2. Migration fallback path: Environment variables (DRONE_DEVICE_TOKENS, DRONE_TOKEN_<ID>)
+  const expectedToken = getExpectedDroneToken(droneId);
+  if (expectedToken) {
+    if (constantTimeCompare(cleanToken, expectedToken)) {
+      req.authenticatedDroneId = droneId;
+      return next();
+    }
     return res.status(401).json({
       error: `Unauthorized: invalid device token for drone '${droneId}'.`
     });
   }
 
-  req.authenticatedDroneId = droneId;
-  next();
+  // 3. If MongoDB is ready and not found in memory/env, query DB
+  if (deviceStore && deviceStore.isMongoReady()) {
+    deviceStore.verifyDeviceToken(droneId, cleanToken).then(isValid => {
+      if (isValid) {
+        req.authenticatedDroneId = droneId;
+        return next();
+      }
+      return res.status(401).json({
+        error: `Unauthorized: invalid device token for drone '${droneId}'.`
+      });
+    }).catch(err => {
+      return res.status(401).json({
+        error: `Unauthorized: device token verification error.`
+      });
+    });
+    return;
+  }
+
+  return res.status(401).json({
+    error: `Unauthorized: no device token configured for drone '${droneId}'.`
+  });
+}
+
+/**
+ * Migration helper: loads DRONE_DEVICE_TOKENS into DeviceStore
+ */
+async function migrateDroneTokens() {
+  const rawTokens = process.env.DRONE_DEVICE_TOKENS || '';
+  if (!rawTokens.trim()) return [];
+
+  const migrated = [];
+  const trimmed = rawTokens.trim();
+  let pairs = [];
+
+  if (trimmed.startsWith('{')) {
+    try {
+      const parsed = JSON.parse(trimmed);
+      pairs = Object.entries(parsed).map(([id, tok]) => ({ id, token: String(tok) }));
+    } catch (e) {}
+  } else {
+    for (const pair of trimmed.split(',')) {
+      const [dId, dToken] = pair.split(':');
+      if (dId && dToken) pairs.push({ id: dId.trim(), token: dToken.trim() });
+    }
+  }
+
+  const Device = require('../models/Device');
+  for (const { id, token } of pairs) {
+    try {
+      const hash = Device.hashToken(token);
+      if (deviceStore.isMongoReady()) {
+        await Device.findOneAndUpdate(
+          { device_id: id },
+          {
+            device_id: id,
+            name: id,
+            type: 'drone',
+            token_hash: hash,
+            status: 'active'
+          },
+          { upsert: true, new: true }
+        );
+      } else {
+        deviceStore.memoryDevices.set(id, {
+          device_id: id,
+          name: id,
+          type: 'drone',
+          token_hash: hash,
+          status: 'active',
+          last_seen: null,
+          created_at: new Date(),
+          updated_at: new Date()
+        });
+      }
+      migrated.push(id);
+    } catch (e) {
+      console.warn(`[Migration] Could not migrate drone ${id}:`, e.message);
+    }
+  }
+  return migrated;
 }
 
 module.exports = {
   ECOWING_OPERATOR_TOKEN,
+  DETECTION_SERVICE_TOKEN,
   validateOperatorTokenConfig,
   verifyOperatorToken,
+  verifyServiceToken,
   verifyDroneToken,
   constantTimeCompare,
-  getExpectedDroneToken
+  getExpectedDroneToken,
+  migrateDroneTokens
 };

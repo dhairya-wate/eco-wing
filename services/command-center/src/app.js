@@ -15,6 +15,7 @@ for (const p of envPaths) {
 
 const { router: apiRouter } = require('./routes/api');
 const droneRouter = require('./routes/drone');
+const deviceRouter = require('./routes/devices');
 const { handleClient } = require('./videoStream');
 const detectionStore = require('./detectionStore');
 const { verifyOperatorToken } = require('./middleware/auth');
@@ -156,6 +157,7 @@ app.post('/api/telemetry', (req, res, next) => { req.url = '/telemetry'; droneRo
 app.post('/api/detection', (req, res, next) => { req.url = '/detection'; droneRouter(req, res, next); });
 app.post('/api/stream-frame', (req, res, next) => { req.url = '/stream-frame'; droneRouter(req, res, next); });
 app.use('/api', apiRouter);
+app.use('/api', deviceRouter);
 
 // Serve static frontend files (index.html, config.js, etc.)
 app.use(express.static(path.join(__dirname, '..')));

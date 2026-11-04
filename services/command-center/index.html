@@ -1689,6 +1689,14 @@ html:not(.authed) body{overflow:hidden}
         <span style="width:7px;height:7px;border-radius:50%;background:#10b981;box-shadow:0 0 8px #10b981;display:inline-block;"></span>
         <span>AI Detection Console ↗</span>
       </a>
+      <button class="header-btn" id="hdrConnectPhoneBtn" style="display:inline-flex;align-items:center;gap:6px;padding:5px 12px;background:rgba(16,185,129,0.15);border:1px solid rgba(16,185,129,0.4);color:var(--primary);font-weight:700;font-size:11.5px;border-radius:20px;margin-right:6px;cursor:pointer" title="Connect mobile phone camera broadcaster">
+        <i class="ti ti-device-mobile"></i>
+        <span>Connect Phone</span>
+      </button>
+      <button class="header-btn" id="hdrDevicesBtn" style="display:inline-flex;align-items:center;gap:6px;padding:5px 12px;background:var(--surface-2);border:1px solid var(--border-color);color:var(--text-primary);font-weight:600;font-size:11.5px;border-radius:20px;margin-right:8px;cursor:pointer" title="Manage registered devices and tokens">
+        <i class="ti ti-devices"></i>
+        <span>Devices</span>
+      </button>
       <div class="hdr-status" id="hdrStatus" data-s="wait" role="status"><i></i><span id="hdrStatusT">Connecting</span></div>
       <time class="hdr-clock" id="hdrClock" aria-label="Local time"></time>
       <div class="hdr-profile" id="hdrProfile">
@@ -1786,6 +1794,26 @@ html:not(.authed) body{overflow:hidden}
       </div>
 
       <div class="drone-controls">
+        <!-- Connected Phone Controls Panel -->
+        <div class="control-card" id="phoneControlCard" style="border:1px solid rgba(16,185,129,0.3);background:linear-gradient(180deg, rgba(16,185,129,0.06), transparent);">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+            <h4 style="margin:0;color:var(--primary);display:flex;align-items:center;gap:6px"><i class="ti ti-device-mobile"></i> Phone Stream Controls</h4>
+            <span id="phoneActiveBadge" class="status-badge" style="font-size:10px;padding:2px 8px;background:rgba(16,185,129,0.2);color:var(--primary)">Idle</span>
+          </div>
+          <div style="font-size:11px;color:var(--text-secondary);margin-bottom:8px">Remote camera actions for connected field phone sensor</div>
+          <div class="control-buttons" style="margin-bottom:8px">
+            <button class="ctrl-btn" id="phoneCmdPause" style="font-size:11px;padding:6px 10px"><i class="ti ti-player-pause"></i> Pause Stream</button>
+            <button class="ctrl-btn success" id="phoneCmdResume" style="font-size:11px;padding:6px 10px"><i class="ti ti-player-play"></i> Resume Stream</button>
+          </div>
+          <div>
+            <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text-secondary);margin-bottom:4px">
+              <span>Confidence Threshold</span>
+              <b id="phoneConfVal" style="color:var(--primary)">0.50</b>
+            </div>
+            <input type="range" id="phoneConfSlider" min="0.10" max="0.95" step="0.05" value="0.50" style="width:100%;accent-color:var(--primary)">
+          </div>
+        </div>
+
         <div class="control-card">
           <h4>Active drone</h4>
           <div class="drone-list" id="droneList"></div>
@@ -2333,6 +2361,167 @@ html:not(.authed) body{overflow:hidden}
     <div class="lb-acts"><button class="lb-btn" id="fcNo">Cancel</button><button class="lb-btn danger" id="fcYes"><i class="ti ti-octagon"></i> Cut motors</button></div>
   </div></div>
   <div class="fc-toast" id="fcToast"></div>
+
+  <!-- Connect Phone Modal -->
+  <div class="lb-modal" id="phoneConnectModal">
+    <div class="lb-dialog" style="max-width:520px;text-align:center" role="dialog" aria-modal="true" aria-labelledby="pcmTitle">
+      <div class="lb-dh" style="text-align:left">
+        <div>
+          <h3 id="pcmTitle"><i class="ti ti-device-mobile" style="color:var(--primary)"></i> Connect Phone Sensor</h3>
+          <p>Scan the QR code or enter the 6-character pairing code on your mobile browser.</p>
+        </div>
+        <button class="lb-x" aria-label="Close" id="pcmClose"><i class="ti ti-x"></i></button>
+      </div>
+
+      <!-- Pairing Code & Countdown -->
+      <div style="background:var(--surface-1);border:1px solid var(--border-light);border-radius:12px;padding:1.25rem;margin:1rem 0;">
+        <div style="font-size:12px;text-transform:uppercase;letter-spacing:1px;color:var(--text-secondary);margin-bottom:6px">Pairing Code (Single-Use, 5-Min TTL)</div>
+        <div id="pcmCode" style="font-family:var(--font-mono);font-size:38px;font-weight:800;letter-spacing:6px;color:var(--primary);margin:8px 0;user-select:all;">------</div>
+        <div style="display:flex;align-items:center;justify-content:center;gap:12px;font-size:13px;color:var(--text-secondary);margin-top:8px">
+          <span><i class="ti ti-clock"></i> Expires in: <b id="pcmTimer" style="color:#f59e0b;font-family:var(--font-mono)">05:00</b></span>
+          <button id="pcmCopyCodeBtn" class="lb-btn" style="height:26px;padding:0 8px;font-size:11px"><i class="ti ti-copy"></i> Copy Code</button>
+        </div>
+      </div>
+
+      <!-- QR Code & Link -->
+      <div style="display:flex;flex-direction:column;align-items:center;margin:1rem 0">
+        <div id="pcmQrContainer" style="width:180px;height:180px;background:#fff;padding:8px;border-radius:8px;box-shadow:var(--shadow-sm);display:flex;align-items:center;justify-content:center">
+          <img id="pcmQrImg" alt="QR Code" style="width:100%;height:100%;object-fit:contain" src="">
+        </div>
+        <a id="pcmMobileLink" href="#" target="_blank" style="margin-top:10px;font-size:12px;color:var(--primary);word-break:break-all;text-decoration:none">
+          Open https://detection-system-flax.vercel.app/mobile ↗
+        </a>
+      </div>
+
+      <!-- Active Connected Sessions -->
+      <div style="text-align:left;margin-top:1rem;border-top:1px solid var(--border-light);padding-top:1rem">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+          <span style="font-weight:600;font-size:13px"><i class="ti ti-broadcast"></i> Active Phone Sessions</span>
+          <button id="pcmRefreshSessions" class="lb-btn" style="height:24px;padding:0 8px;font-size:11px"><i class="ti ti-refresh"></i> Refresh</button>
+        </div>
+        <div id="pcmSessionsList" style="max-height:130px;overflow-y:auto;font-size:12px">
+          <div style="color:var(--text-muted);font-style:italic">No active phone sessions connected.</div>
+        </div>
+      </div>
+
+      <div class="lb-acts" style="margin-top:1.25rem">
+        <button class="lb-btn" id="pcmCloseBtn">Close</button>
+        <button class="lb-btn primary" id="pcmRegenBtn" style="display:inline-flex;align-items:center;gap:6px"><i class="ti ti-reload"></i> Regenerate Code</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Devices & Token Governance Modal -->
+  <div class="lb-modal" id="devicesModal">
+    <div class="lb-dialog" style="max-width:680px" role="dialog" aria-modal="true" aria-labelledby="devTitle">
+      <div class="lb-dh">
+        <div>
+          <h3 id="devTitle"><i class="ti ti-devices" style="color:var(--primary)"></i> Device Registry &amp; Token Governance</h3>
+          <p>Register phones &amp; drones, manage long-lived device tokens, and inspect active sessions.</p>
+        </div>
+        <button class="lb-x" aria-label="Close" id="devClose"><i class="ti ti-x"></i></button>
+      </div>
+
+      <!-- Register Device Form -->
+      <div style="background:var(--surface-1);border:1px solid var(--border-light);border-radius:8px;padding:12px 14px;margin:10px 0 16px">
+        <div style="font-weight:700;font-size:13px;margin-bottom:8px"><i class="ti ti-plus"></i> Register New Field Device</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 120px auto;gap:8px;align-items:end">
+          <div>
+            <label style="font-size:11px;color:var(--text-secondary)">Device Identifier</label>
+            <input class="mp-in" id="regDevId" placeholder="e.g. phone-pixel8" style="font-size:12px;padding:6px 10px">
+          </div>
+          <div>
+            <label style="font-size:11px;color:var(--text-secondary)">Callsign / Name</label>
+            <input class="mp-in" id="regDevName" placeholder="e.g. Field Phone Alpha" style="font-size:12px;padding:6px 10px">
+          </div>
+          <div>
+            <label style="font-size:11px;color:var(--text-secondary)">Type</label>
+            <select class="mp-in" id="regDevType" style="font-size:12px;padding:6px 8px">
+              <option value="phone">Phone</option>
+              <option value="drone">Drone</option>
+            </select>
+          </div>
+          <button id="btnRegisterDevice" class="lb-btn primary" style="height:34px;font-size:12px;padding:0 12px">Register</button>
+        </div>
+      </div>
+
+      <!-- Registered Devices Table -->
+      <div style="margin-bottom:14px">
+        <div style="font-weight:600;font-size:13px;margin-bottom:6px;display:flex;justify-content:space-between">
+          <span>Registered Devices (<span id="devCount">0</span>)</span>
+          <button id="btnRefreshDevices" class="lb-btn" style="height:22px;padding:0 6px;font-size:11px"><i class="ti ti-refresh"></i> Refresh</button>
+        </div>
+        <div style="max-height:160px;overflow-y:auto;border:1px solid var(--border-light);border-radius:6px">
+          <table style="width:100%;border-collapse:collapse;font-size:12px;text-align:left">
+            <thead style="background:var(--surface-2);color:var(--text-secondary);font-size:11px">
+              <tr>
+                <th style="padding:6px 10px">Type</th>
+                <th style="padding:6px 10px">ID</th>
+                <th style="padding:6px 10px">Name</th>
+                <th style="padding:6px 10px">Status</th>
+                <th style="padding:6px 10px">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="devicesTableBody">
+              <tr><td colspan="5" style="padding:10px;text-align:center;color:var(--text-muted)">Loading devices...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Active Sessions Table -->
+      <div>
+        <div style="font-weight:600;font-size:13px;margin-bottom:6px">Active Scoped Sessions</div>
+        <div style="max-height:130px;overflow-y:auto;border:1px solid var(--border-light);border-radius:6px">
+          <table style="width:100%;border-collapse:collapse;font-size:12px;text-align:left">
+            <thead style="background:var(--surface-2);color:var(--text-secondary);font-size:11px">
+              <tr>
+                <th style="padding:6px 10px">Session ID</th>
+                <th style="padding:6px 10px">Device ID</th>
+                <th style="padding:6px 10px">Expires</th>
+                <th style="padding:6px 10px">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="sessionsTableBody">
+              <tr><td colspan="4" style="padding:10px;text-align:center;color:var(--text-muted)">No active sessions</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="lb-acts" style="margin-top:14px">
+        <button class="lb-btn" id="devicesCloseBtn">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- One-Time Token Display Modal -->
+  <div class="lb-modal" id="tokenDisplayModal">
+    <div class="lb-dialog" style="max-width:480px" role="dialog" aria-modal="true" aria-labelledby="tdmTitle">
+      <div class="lb-dh">
+        <div>
+          <h3 id="tdmTitle"><i class="ti ti-key" style="color:#f59e0b"></i> Save Device Token</h3>
+          <p>This token is shown only once and cannot be recovered.</p>
+        </div>
+        <button class="lb-x" aria-label="Close" id="tdmClose"><i class="ti ti-x"></i></button>
+      </div>
+      <div style="background:rgba(245,158,11,0.1);border:1px solid rgba(245,158,11,0.3);border-radius:8px;padding:12px;margin:12px 0">
+        <div style="font-size:12px;color:var(--text-primary);margin-bottom:8px">
+          <b>Device ID:</b> <span id="tdmDevId" style="font-family:var(--font-mono)"></span>
+        </div>
+        <div style="display:flex;gap:6px;align-items:center">
+          <input id="tdmTokenInput" readonly style="font-family:var(--font-mono);font-size:12px;padding:8px 10px;border-radius:6px;border:1px solid var(--border-light);background:var(--surface-0);color:var(--text-primary);flex:1" value="">
+          <button id="tdmCopyBtn" class="lb-btn primary" style="font-size:12px;padding:8px 12px"><i class="ti ti-copy"></i> Copy</button>
+        </div>
+        <div style="font-size:11px;color:var(--text-secondary);margin-top:8px">
+          <i class="ti ti-shield-lock"></i> EcoWing stores only a SHA-256 hash of this token. Configure this in your field device sensor outbox.
+        </div>
+      </div>
+      <div class="lb-acts">
+        <button class="lb-btn primary" id="tdmDoneBtn">I Have Stored the Token</button>
+      </div>
+    </div>
+  </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
@@ -4313,6 +4502,473 @@ window.addEventListener('load',function(){try{
   document.addEventListener('keydown',e=>{if(e.key==='Escape')toggle(false)});
   new MutationObserver(sync).observe(tabs,{subtree:true,attributes:true,attributeFilter:['class']});
   sync();
+})();
+</script>
+<script>
+/* ==========================================================================
+   EcoWing Three-Tier Token Architecture & Device Management Client JS
+   ========================================================================== */
+(function() {
+  const $ = id => document.getElementById(id);
+
+  function getOperatorToken() {
+    return localStorage.getItem('ecowing_operator_token') ||
+           (window.DASHBOARD_CONFIG && window.DASHBOARD_CONFIG.operatorToken) ||
+           'secure_test_operator_token_9xK2mP7qR4vL8wZ1';
+  }
+
+  function getApiBase() {
+    return (typeof API_BASE !== 'undefined' && API_BASE) ? API_BASE : '';
+  }
+
+  // --- Connect Phone Modal Logic ---
+  let pairingCountdownTimer = null;
+  let pairingExpiryTime = 0;
+
+  function formatTime(seconds) {
+    const m = Math.floor(seconds / 60);
+    const s = Math.floor(seconds % 60);
+    return (m < 10 ? '0' : '') + m + ':' + (s < 10 ? '0' : '') + s;
+  }
+
+  async function openPhoneConnectModal() {
+    const modal = $('phoneConnectModal');
+    if (!modal) return;
+    modal.classList.add('open');
+    await requestNewPairingCode();
+    await loadActiveSessions();
+  }
+
+  function closePhoneConnectModal() {
+    const modal = $('phoneConnectModal');
+    if (modal) modal.classList.remove('open');
+    if (pairingCountdownTimer) clearInterval(pairingCountdownTimer);
+  }
+
+  async function requestNewPairingCode() {
+    const codeEl = $('pcmCode');
+    const timerEl = $('pcmTimer');
+    const qrImg = $('pcmQrImg');
+    const linkEl = $('pcmMobileLink');
+
+    if (codeEl) codeEl.textContent = '...';
+    if (timerEl) timerEl.textContent = '05:00';
+
+    try {
+      const res = await fetch(getApiBase() + '/api/mobile/pairing_code', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Operator-Token': getOperatorToken()
+        },
+        body: JSON.stringify({})
+      });
+      const data = await res.json();
+      if (!res.ok || !data.code) {
+        throw new Error(data.error || 'Failed to create pairing code');
+      }
+
+      if (codeEl) codeEl.textContent = data.code;
+      const mobileBase = 'https://detection-system-flax.vercel.app/mobile';
+      const fullUrl = mobileBase + '?code=' + encodeURIComponent(data.code);
+
+      if (linkEl) {
+        linkEl.href = fullUrl;
+        linkEl.textContent = fullUrl + ' ↗';
+      }
+
+      if (qrImg) {
+        qrImg.src = 'https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=' + encodeURIComponent(fullUrl);
+      }
+
+      // Countdown
+      if (pairingCountdownTimer) clearInterval(pairingCountdownTimer);
+      const ttl = data.expires_in || 300;
+      pairingExpiryTime = Date.now() + ttl * 1000;
+
+      pairingCountdownTimer = setInterval(() => {
+        const remaining = Math.max(0, Math.floor((pairingExpiryTime - Date.now()) / 1000));
+        if (timerEl) {
+          timerEl.textContent = formatTime(remaining);
+          if (remaining <= 0) {
+            timerEl.textContent = 'EXPIRED';
+            timerEl.style.color = '#ef4444';
+            clearInterval(pairingCountdownTimer);
+          } else {
+            timerEl.style.color = '#f59e0b';
+          }
+        }
+      }, 1000);
+
+    } catch (err) {
+      if (codeEl) codeEl.textContent = 'ERROR';
+      if (window.toast) toast('Error generating code: ' + err.message, 'err', 'ti-alert-circle');
+    }
+  }
+
+  async function loadActiveSessions() {
+    const listEl = $('pcmSessionsList');
+    const tableBody = $('sessionsTableBody');
+    try {
+      const res = await fetch(getApiBase() + '/api/mobile/sessions', {
+        headers: { 'X-Operator-Token': getOperatorToken() }
+      });
+      const data = await res.json();
+      const sessions = (data && data.sessions) ? data.sessions : [];
+
+      // Update in Connect Phone modal
+      if (listEl) {
+        if (!sessions.length) {
+          listEl.innerHTML = '<div style="color:var(--text-muted);font-style:italic">No active phone sessions connected.</div>';
+        } else {
+          listEl.innerHTML = sessions.map(s => `
+            <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border-light)">
+              <div>
+                <b style="color:var(--text-primary)">${s.device_id}</b>
+                <span style="font-size:11px;color:var(--text-muted);margin-left:6px">ID: ${s.session_id.substring(0, 12)}...</span>
+              </div>
+              <button class="lb-btn danger btn-revoke-session" data-id="${s.session_id}" style="height:22px;padding:0 6px;font-size:10px">Revoke</button>
+            </div>
+          `).join('');
+        }
+      }
+
+      // Update in Devices modal table
+      if (tableBody) {
+        if (!sessions.length) {
+          tableBody.innerHTML = '<tr><td colspan="4" style="padding:10px;text-align:center;color:var(--text-muted)">No active sessions</td></tr>';
+        } else {
+          tableBody.innerHTML = sessions.map(s => `
+            <tr style="border-bottom:1px solid var(--border-light)">
+              <td style="padding:6px 10px;font-family:var(--font-mono)">${s.session_id.substring(0, 16)}...</td>
+              <td style="padding:6px 10px;font-weight:600">${s.device_id}</td>
+              <td style="padding:6px 10px">${new Date(s.expires_at).toLocaleTimeString()}</td>
+              <td style="padding:6px 10px">
+                <button class="lb-btn danger btn-revoke-session" data-id="${s.session_id}" style="height:22px;padding:0 6px;font-size:10px">Revoke</button>
+              </td>
+            </tr>
+          `).join('');
+        }
+      }
+
+      // Wire revoke buttons
+      document.querySelectorAll('.btn-revoke-session').forEach(btn => {
+        btn.onclick = async () => {
+          const sid = btn.dataset.id;
+          await revokeSession(sid);
+        };
+      });
+
+      // Update phone active badge
+      const badge = $('phoneActiveBadge');
+      if (badge) {
+        if (sessions.length > 0) {
+          badge.textContent = `${sessions.length} Phone Connected`;
+          badge.className = 'status-badge ok';
+        } else {
+          badge.textContent = 'Idle';
+          badge.className = 'status-badge';
+        }
+      }
+
+    } catch (e) {
+      console.warn('Could not load sessions:', e.message);
+    }
+  }
+
+  async function revokeSession(sessionId) {
+    try {
+      const res = await fetch(getApiBase() + '/api/mobile/revoke-session', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Operator-Token': getOperatorToken()
+        },
+        body: JSON.stringify({ session_id: sessionId })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        if (window.toast) toast(`Session ${sessionId.substring(0, 8)} revoked`, 'ok', 'ti-shield-x');
+        await loadActiveSessions();
+      } else {
+        if (window.toast) toast(data.error || 'Failed to revoke', 'err', 'ti-alert-circle');
+      }
+    } catch (e) {
+      if (window.toast) toast(e.message, 'err', 'ti-alert-circle');
+    }
+  }
+
+  // --- Devices Modal Logic ---
+  async function openDevicesModal() {
+    const modal = $('devicesModal');
+    if (!modal) return;
+    modal.classList.add('open');
+    await loadDevices();
+    await loadActiveSessions();
+  }
+
+  function closeDevicesModal() {
+    const modal = $('devicesModal');
+    if (modal) modal.classList.remove('open');
+  }
+
+  async function loadDevices() {
+    const tbody = $('devicesTableBody');
+    const countEl = $('devCount');
+    if (!tbody) return;
+
+    try {
+      const res = await fetch(getApiBase() + '/api/devices', {
+        headers: { 'X-Operator-Token': getOperatorToken() }
+      });
+      const data = await res.json();
+      const devices = (data && data.devices) ? data.devices : [];
+
+      if (countEl) countEl.textContent = devices.length;
+
+      if (!devices.length) {
+        tbody.innerHTML = '<tr><td colspan="5" style="padding:10px;text-align:center;color:var(--text-muted)">No devices registered yet.</td></tr>';
+        return;
+      }
+
+      tbody.innerHTML = devices.map(d => `
+        <tr style="border-bottom:1px solid var(--border-light)">
+          <td style="padding:6px 10px"><span class="status-badge" style="font-size:10px">${d.type}</span></td>
+          <td style="padding:6px 10px;font-family:var(--font-mono);font-weight:600">${d.device_id}</td>
+          <td style="padding:6px 10px">${d.name || '-'}</td>
+          <td style="padding:6px 10px">
+            <span class="status-badge ${d.status === 'active' ? 'ok' : 'err'}" style="font-size:10px">${d.status}</span>
+          </td>
+          <td style="padding:6px 10px;display:flex;gap:4px">
+            <button class="lb-btn btn-rot-dev" data-id="${d.device_id}" style="height:22px;padding:0 6px;font-size:10px"><i class="ti ti-key"></i> Rotate</button>
+            ${d.status === 'active' ? `<button class="lb-btn danger btn-rev-dev" data-id="${d.device_id}" style="height:22px;padding:0 6px;font-size:10px"><i class="ti ti-ban"></i> Revoke</button>` : ''}
+          </td>
+        </tr>
+      `).join('');
+
+      document.querySelectorAll('.btn-rot-dev').forEach(b => {
+        b.onclick = async () => {
+          await rotateDeviceToken(b.dataset.id);
+        };
+      });
+
+      document.querySelectorAll('.btn-rev-dev').forEach(b => {
+        b.onclick = async () => {
+          await revokeDevice(b.dataset.id);
+        };
+      });
+
+    } catch (e) {
+      tbody.innerHTML = '<tr><td colspan="5" style="padding:10px;text-align:center;color:var(--danger)">Failed to load devices</td></tr>';
+    }
+  }
+
+  async function registerDevice() {
+    const id = ($('regDevId').value || '').trim();
+    const name = ($('regDevName').value || '').trim();
+    const type = $('regDevType').value || 'phone';
+
+    if (!id) {
+      if (window.toast) toast('Please enter a Device ID', 'warn', 'ti-alert-triangle');
+      return;
+    }
+
+    try {
+      const res = await fetch(getApiBase() + '/api/devices', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Operator-Token': getOperatorToken()
+        },
+        body: JSON.stringify({ device_id: id, name, type })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to register');
+
+      $('regDevId').value = '';
+      $('regDevName').value = '';
+
+      if (window.toast) toast(`Device '${id}' registered!`, 'ok', 'ti-check');
+      showOneTimeToken(id, data.raw_token);
+      await loadDevices();
+    } catch (err) {
+      if (window.toast) toast(err.message, 'err', 'ti-alert-circle');
+    }
+  }
+
+  async function rotateDeviceToken(deviceId) {
+    if (!confirm(`Rotate authentication token for '${deviceId}'? Any existing sessions will be disconnected.`)) return;
+
+    try {
+      const res = await fetch(getApiBase() + `/api/devices/${encodeURIComponent(deviceId)}/rotate-token`, {
+        method: 'POST',
+        headers: { 'X-Operator-Token': getOperatorToken() }
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to rotate');
+
+      if (window.toast) toast(`Token rotated for ${deviceId}`, 'ok', 'ti-key');
+      showOneTimeToken(deviceId, data.raw_token);
+      await loadDevices();
+    } catch (e) {
+      if (window.toast) toast(e.message, 'err', 'ti-alert-circle');
+    }
+  }
+
+  async function revokeDevice(deviceId) {
+    if (!confirm(`Are you sure you want to revoke device '${deviceId}'? It will no longer be able to ingest telemetry or stream camera frames.`)) return;
+
+    try {
+      const res = await fetch(getApiBase() + `/api/devices/${encodeURIComponent(deviceId)}/revoke`, {
+        method: 'POST',
+        headers: { 'X-Operator-Token': getOperatorToken() }
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to revoke');
+
+      if (window.toast) toast(`Device '${deviceId}' revoked`, 'warn', 'ti-ban');
+      await loadDevices();
+      await loadActiveSessions();
+    } catch (e) {
+      if (window.toast) toast(e.message, 'err', 'ti-alert-circle');
+    }
+  }
+
+  function showOneTimeToken(deviceId, rawToken) {
+    const modal = $('tokenDisplayModal');
+    const idEl = $('tdmDevId');
+    const inEl = $('tdmTokenInput');
+    if (idEl) idEl.textContent = deviceId;
+    if (inEl) inEl.value = rawToken;
+    if (modal) modal.classList.add('open');
+  }
+
+  // --- Phone Control Commands ---
+  async function sendPhoneCommand(command, params = {}) {
+    try {
+      // Find active phone session or registered phone
+      const sessRes = await fetch(getApiBase() + '/api/mobile/sessions', {
+        headers: { 'X-Operator-Token': getOperatorToken() }
+      });
+      const sessData = await sessRes.json();
+      const phoneId = (sessData.sessions && sessData.sessions[0]) ? sessData.sessions[0].device_id : 'phone-01';
+
+      const res = await fetch(getApiBase() + '/api/device/command', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Operator-Token': getOperatorToken()
+        },
+        body: JSON.stringify({
+          drone_id: phoneId,
+          target: 'phone',
+          command,
+          params
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Command failed');
+
+      if (window.toast) toast(data.message || `Phone command executed: ${command}`, 'ok', 'ti-device-mobile');
+    } catch (e) {
+      if (window.toast) toast(e.message, 'err', 'ti-alert-circle');
+    }
+  }
+
+  // --- Wire UI Events ---
+  window.addEventListener('DOMContentLoaded', () => {
+    // Header Buttons
+    const hdrCp = $('hdrConnectPhoneBtn');
+    if (hdrCp) hdrCp.onclick = openPhoneConnectModal;
+
+    const hdrDev = $('hdrDevicesBtn');
+    if (hdrDev) hdrDev.onclick = openDevicesModal;
+
+    const autoConn = $('btnPhoneAutoConnect');
+    if (autoConn) autoConn.onclick = openPhoneConnectModal;
+
+    // Connect Phone Modal Actions
+    const pcmClose = $('pcmClose');
+    if (pcmClose) pcmClose.onclick = closePhoneConnectModal;
+
+    const pcmCloseBtn = $('pcmCloseBtn');
+    if (pcmCloseBtn) pcmCloseBtn.onclick = closePhoneConnectModal;
+
+    const pcmRegen = $('pcmRegenBtn');
+    if (pcmRegen) pcmRegen.onclick = requestNewPairingCode;
+
+    const pcmCopy = $('pcmCopyCodeBtn');
+    if (pcmCopy) {
+      pcmCopy.onclick = () => {
+        const c = $('pcmCode').textContent;
+        navigator.clipboard.writeText(c).then(() => {
+          if (window.toast) toast('Pairing code copied to clipboard!', 'ok', 'ti-copy');
+        });
+      };
+    }
+
+    const pcmRefresh = $('pcmRefreshSessions');
+    if (pcmRefresh) pcmRefresh.onclick = loadActiveSessions;
+
+    // Devices Modal Actions
+    const devClose = $('devClose');
+    if (devClose) devClose.onclick = closeDevicesModal;
+
+    const devCloseBtn = $('devicesCloseBtn');
+    if (devCloseBtn) devCloseBtn.onclick = closeDevicesModal;
+
+    const btnReg = $('btnRegisterDevice');
+    if (btnReg) btnReg.onclick = registerDevice;
+
+    const btnRefDev = $('btnRefreshDevices');
+    if (btnRefDev) btnRefDev.onclick = loadDevices;
+
+    // Token Modal Actions
+    const tdmClose = $('tdmClose');
+    if (tdmClose) tdmClose.onclick = () => $('tokenDisplayModal').classList.remove('open');
+
+    const tdmDone = $('tdmDoneBtn');
+    if (tdmDone) tdmDone.onclick = () => $('tokenDisplayModal').classList.remove('open');
+
+    const tdmCopy = $('tdmCopyBtn');
+    if (tdmCopy) {
+      tdmCopy.onclick = () => {
+        const tok = $('tdmTokenInput').value;
+        navigator.clipboard.writeText(tok).then(() => {
+          if (window.toast) toast('Device token copied!', 'ok', 'ti-copy');
+        });
+      };
+    }
+
+    // Phone Controls
+    const pPause = $('phoneCmdPause');
+    if (pPause) pPause.onclick = () => sendPhoneCommand('pause_stream');
+
+    const pResume = $('phoneCmdResume');
+    if (pResume) pResume.onclick = () => sendPhoneCommand('resume_stream');
+
+    const pSlider = $('phoneConfSlider');
+    const pVal = $('phoneConfVal');
+    if (pSlider && pVal) {
+      pSlider.oninput = () => { pVal.textContent = Number(pSlider.value).toFixed(2); };
+      pSlider.onchange = () => {
+        sendPhoneCommand('set_confidence', { confidence: parseFloat(pSlider.value) });
+      };
+    }
+
+    // Listen to Socket.IO events for live sessions updates
+    if (typeof io === 'function') {
+      try {
+        const s = io(getApiBase() || undefined);
+        s.on('session_created', () => { loadActiveSessions(); });
+        s.on('session_revoked', () => { loadActiveSessions(); });
+        s.on('device_revoked', () => { loadDevices(); });
+      } catch (e) {}
+    }
+
+    // Periodically poll active sessions every 10 seconds
+    setInterval(loadActiveSessions, 10000);
+  });
 })();
 </script>
 </body>

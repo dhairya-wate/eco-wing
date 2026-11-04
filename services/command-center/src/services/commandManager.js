@@ -5,7 +5,9 @@
 
 const crypto = require('crypto');
 
-const ALLOWED_COMMANDS = new Set(['start', 'hold', 'rth', 'land', 'estop', 'photo', 'zoom']);
+const DRONE_COMMANDS = new Set(['start', 'hold', 'rth', 'land', 'estop', 'photo', 'zoom']);
+const PHONE_COMMANDS = new Set(['pause_stream', 'resume_stream', 'set_confidence']);
+const ALLOWED_COMMANDS = new Set([...DRONE_COMMANDS, ...PHONE_COMMANDS]);
 
 const ALLOWED_STATES = new Set([
   'requested', 'sent', 'acknowledged', 'executing',
@@ -77,15 +79,39 @@ class CommandManager {
 
   /**
    * Creates a new command instance in initial state 'requested'.
+   * Enforces cross-target validation between drone and phone commands.
    */
-  createCommand({ drone_id, command, params = {}, actor = 'operator_console', command_id = null }) {
+  createCommand({ drone_id, target = 'drone', command, params = {}, actor = 'operator_console', command_id = null }) {
     if (!drone_id || !DRONE_ID_REGEX.test(String(drone_id))) {
       throw new Error(`Invalid drone_id: '${drone_id}'.`);
     }
 
+    const cleanTarget = String(target || 'drone').trim().toLowerCase();
+    if (!['drone', 'phone'].includes(cleanTarget)) {
+      throw new Error(`Invalid target: '${cleanTarget}'. Allowed targets: 'drone', 'phone'.`);
+    }
+
     const cleanCommand = String(command).trim().toLowerCase();
-    if (!ALLOWED_COMMANDS.has(cleanCommand)) {
-      throw new Error(`Invalid command verb: '${cleanCommand}'. Allowed: ${Array.from(ALLOWED_COMMANDS).join(', ')}.`);
+    if (cleanTarget === 'drone') {
+      if (PHONE_COMMANDS.has(cleanCommand)) {
+        throw new Error(`Invalid command verb '${cleanCommand}' for target 'drone'. Drone commands allowed: ${Array.from(DRONE_COMMANDS).join(', ')}.`);
+      }
+      if (!DRONE_COMMANDS.has(cleanCommand)) {
+        throw new Error(`Invalid command verb: '${cleanCommand}'. Allowed: ${Array.from(DRONE_COMMANDS).join(', ')}.`);
+      }
+    } else if (cleanTarget === 'phone') {
+      if (DRONE_COMMANDS.has(cleanCommand)) {
+        throw new Error(`Invalid command verb '${cleanCommand}' for target 'phone'. Phone commands allowed: ${Array.from(PHONE_COMMANDS).join(', ')}.`);
+      }
+      if (!PHONE_COMMANDS.has(cleanCommand)) {
+        throw new Error(`Invalid command verb: '${cleanCommand}'. Allowed: ${Array.from(PHONE_COMMANDS).join(', ')}.`);
+      }
+      if (cleanCommand === 'set_confidence') {
+        const conf = params ? params.confidence : undefined;
+        if (conf === undefined || typeof conf !== 'number' || isNaN(conf) || conf < 0.0 || conf > 1.0) {
+          throw new Error("Parameter 'confidence' for 'set_confidence' must be a number between 0.0 and 1.0.");
+        }
+      }
     }
 
     let cmdId = command_id;
@@ -101,6 +127,7 @@ class CommandManager {
     const commandObj = {
       command_id: cmdId,
       drone_id: String(drone_id),
+      target: cleanTarget,
       command: cleanCommand,
       params: typeof params === 'object' && params !== null ? params : {},
       state: 'requested',
@@ -209,6 +236,8 @@ const commandManager = new CommandManager();
 
 module.exports = {
   ALLOWED_COMMANDS,
+  DRONE_COMMANDS,
+  PHONE_COMMANDS,
   ALLOWED_STATES,
   ALLOWED_TRANSITIONS,
   CommandManager,

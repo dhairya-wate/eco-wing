@@ -8,6 +8,9 @@ const { getStreamStats } = require('../videoStream');
 const detectionStore = require('../detectionStore');
 const { verifyOperatorToken } = require('../middleware/auth');
 const { commandManager } = require('../services/commandManager');
+const deviceRouter = require('./devices');
+
+router.use(deviceRouter);
 
 // E1: Whitelist definitions and identifier constraints
 const ALLOWED_DRONE_COMMANDS = ['start', 'hold', 'rth', 'land'];
