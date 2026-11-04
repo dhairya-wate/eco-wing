@@ -472,9 +472,86 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
+  let activeWasteFilter = "all";
+  let lastReceivedTelemetry = null;
+
+  function getWasteIcon(name) {
+    const n = (name || "").toLowerCase();
+    if (n.includes("bottle")) return "🍾";
+    if (n.includes("cup") || n.includes("can") || n.includes("tin")) return "🥫";
+    if (n.includes("organic") || n.includes("fruit") || n.includes("food") || n.includes("banana") || n.includes("apple")) return "🍎";
+    if (n.includes("paper") || n.includes("cardboard") || n.includes("book")) return "📄";
+    if (n.includes("glass")) return "🪟";
+    if (n.includes("bag") || n.includes("plastic")) return "🛍️";
+    return "🗑️";
+  }
+
+  function renderFilteredItems() {
+    if (!detectedItemsContainer) return;
+    if (!lastReceivedTelemetry || !lastReceivedTelemetry.items || lastReceivedTelemetry.items.length === 0) {
+      detectedItemsContainer.innerHTML = `
+        <div class="empty-state">
+          <span class="empty-icon">🔍</span>
+          <p>No waste items in view</p>
+          <small>Point camera at plastic, paper, glass, can, cardboard, or food waste</small>
+        </div>
+      `;
+      return;
+    }
+
+    const filtered = lastReceivedTelemetry.items.filter(item => {
+      if (activeWasteFilter === "recyclable") return item.recyclable === true;
+      if (activeWasteFilter === "non-recyclable") return item.recyclable === false;
+      if (activeWasteFilter === "biodegradable") return item.biodegradable === true;
+      return true; // "all"
+    });
+
+    if (filtered.length === 0) {
+      detectedItemsContainer.innerHTML = `
+        <div class="empty-state">
+          <span class="empty-icon">🔎</span>
+          <p>No items matching '${activeWasteFilter}' filter</p>
+          <small>Select 'All' to view all active detections</small>
+        </div>
+      `;
+      return;
+    }
+
+    let html = "";
+    filtered.forEach(item => {
+      const icon = getWasteIcon(item.name);
+      const recClass = item.recyclable ? "tag-rec-yes" : "tag-rec-no";
+      const recText = item.recyclable ? "Recyclable" : "Non-Rec";
+      const bioClass = item.biodegradable ? "tag-bio-yes" : "tag-bio-no";
+      const bioText = item.biodegradable ? "Bio" : "Non-Bio";
+      const conf = Math.round(item.confidence || 0);
+
+      html += `
+        <div class="item-badge">
+          <div class="item-main">
+            <span class="item-title">${icon} ${item.name}</span>
+            <span class="item-bin">Disposal: <strong>${item.bin || 'General'}</strong></span>
+            <div class="conf-bar-wrap" title="Confidence: ${conf}%">
+              <div class="conf-bar-fill" style="width: ${conf}%;"></div>
+            </div>
+          </div>
+          <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 4px;">
+            <div class="item-tags">
+              <span class="tag ${recClass}">${recText}</span>
+              <span class="tag ${bioClass}">${bioText}</span>
+            </div>
+            <span style="font-family: var(--font-mono); font-size: 10px; font-weight: 700; color: #38bdf8;">${conf}%</span>
+          </div>
+        </div>
+      `;
+    });
+    detectedItemsContainer.innerHTML = html;
+  }
+
   // Update telemetry metrics cards
   function updateTelemetry(data) {
     if (!data) return;
+    lastReceivedTelemetry = data;
 
     const total = data.total_count || 0;
     const rec = data.recyclable_count || 0;
@@ -492,37 +569,7 @@ document.addEventListener("DOMContentLoaded", () => {
     subRec.textContent = `${pct}% of detected`;
     livePillCount.textContent = `${total} Detected`;
 
-    if (data.items && data.items.length > 0) {
-      let html = "";
-      data.items.forEach(item => {
-        const recClass = item.recyclable ? "tag-rec-yes" : "tag-rec-no";
-        const recText = item.recyclable ? "Recyclable" : "Non-Recyclable";
-        const bioClass = item.biodegradable ? "tag-bio-yes" : "tag-bio-no";
-        const bioText = item.biodegradable ? "Bio-degradable" : "Non-Bio";
-
-        html += `
-          <div class="item-badge">
-            <div class="item-main">
-              <span class="item-title">${item.name} (${item.confidence}%)</span>
-              <span class="item-bin">Disposal: ${item.bin}</span>
-            </div>
-            <div class="item-tags">
-              <span class="tag ${recClass}">${recText}</span>
-              <span class="tag ${bioClass}">${bioText}</span>
-            </div>
-          </div>
-        `;
-      });
-      detectedItemsContainer.innerHTML = html;
-    } else {
-      detectedItemsContainer.innerHTML = `
-        <div class="empty-state">
-          <span class="empty-icon">🔍</span>
-          <p>No waste items in view</p>
-          <small>Point camera at paper, glass, can, cardboard, or food waste</small>
-        </div>
-      `;
-    }
+    renderFilteredItems();
   }
 
   // WebSocket Connection
@@ -837,6 +884,142 @@ document.addEventListener("DOMContentLoaded", () => {
       console.error("Copy failed", err);
     });
   };
+
+
+  // Category Quick-Filter Bar
+  const filterChips = document.querySelectorAll(".filter-chip");
+  filterChips.forEach(chip => {
+    chip.addEventListener("click", () => {
+      filterChips.forEach(c => c.classList.remove("active"));
+      chip.classList.add("active");
+      activeWasteFilter = chip.getAttribute("data-filter") || "all";
+      renderFilteredItems();
+    });
+  });
+
+  // HUD Snapshot Capture & Download
+  const btnHudSnapshot = document.getElementById("btn-hud-snapshot");
+  if (btnHudSnapshot) {
+    btnHudSnapshot.addEventListener("click", () => {
+      const snapCanvas = document.createElement("canvas");
+      const ctx = snapCanvas.getContext("2d");
+      let sourceWidth = 640;
+      let sourceHeight = 480;
+
+      const isViewer = tabModeViewer && tabModeViewer.classList.contains("active");
+      const srcEl = isViewer ? streamImg : annotatedCanvas;
+
+      if (srcEl && (srcEl.videoWidth || srcEl.naturalWidth || srcEl.width)) {
+        sourceWidth = srcEl.videoWidth || srcEl.naturalWidth || srcEl.width;
+        sourceHeight = srcEl.videoHeight || srcEl.naturalHeight || srcEl.height;
+      }
+      snapCanvas.width = sourceWidth;
+      snapCanvas.height = sourceHeight;
+
+      if (srcEl) {
+        try {
+          ctx.drawImage(srcEl, 0, 0, sourceWidth, sourceHeight);
+        } catch (e) {
+          console.warn("Snapshot drawImage error (possible CORS):", e);
+        }
+      }
+
+      // Sleek Tactical HUD Watermark Banner
+      ctx.fillStyle = "rgba(7, 10, 14, 0.85)";
+      ctx.fillRect(0, sourceHeight - 40, sourceWidth, 40);
+      ctx.fillStyle = "#10b981";
+      ctx.font = "bold 13px 'JetBrains Mono', monospace";
+      ctx.fillText("ECOWING AERIAL RECON | WASTE SCANNER", 16, sourceHeight - 16);
+
+      const dStr = new Date().toISOString().replace(/T/, ' ').replace(/\..+/, '');
+      ctx.fillStyle = "#94a3b8";
+      ctx.font = "11px 'JetBrains Mono', monospace";
+      ctx.fillText(`TIMESTAMP: ${dStr} UTC | CONF: ${confSlider ? confSlider.value : 35}%`, sourceWidth - 300, sourceHeight - 16);
+
+      snapCanvas.toBlob(blob => {
+        if (!blob) return;
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `ecowing-recon-${Date.now()}.png`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+
+        const origHtml = btnHudSnapshot.innerHTML;
+        btnHudSnapshot.innerHTML = "<span>✓</span> Saved!";
+        setTimeout(() => { btnHudSnapshot.innerHTML = origHtml; }, 1800);
+      }, "image/png");
+    });
+  }
+
+  // Tactical HUD Reticle Toggle
+  const btnHudReticle = document.getElementById("btn-hud-reticle");
+  const hudCrosshair = document.getElementById("hud-crosshair");
+  if (btnHudReticle && hudCrosshair) {
+    btnHudReticle.addEventListener("click", () => {
+      const isHidden = hudCrosshair.style.display === "none";
+      hudCrosshair.style.display = isHidden ? "block" : "none";
+      btnHudReticle.classList.toggle("active", isHidden);
+    });
+  }
+
+  // Night Vision / FLIR Thermal Tactical Mode
+  const btnHudNight = document.getElementById("btn-hud-night");
+  if (btnHudNight && videoWrapper) {
+    btnHudNight.addEventListener("click", () => {
+      videoWrapper.classList.toggle("night-vision");
+      btnHudNight.classList.toggle("active");
+    });
+  }
+
+  // Quick Test Sample Waste Chips
+  const sampleChips = document.querySelectorAll(".sample-chip");
+  sampleChips.forEach(chip => {
+    chip.addEventListener("click", async () => {
+      const sampleUrl = chip.getAttribute("data-sample");
+      if (!sampleUrl) return;
+
+      if (uploadResult) {
+        uploadResult.classList.remove("hidden");
+        uploadResult.innerHTML = `
+          <div style="padding: 12px; background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: 8px; color: #10b981; font-size: 12px; display: flex; align-items: center; gap: 8px;">
+            <span class="pulse-dot"></span> Analyzing ${chip.innerText.trim()} with AI Waste Model...
+          </div>
+        `;
+      }
+
+      try {
+        const resp = await fetch(sampleUrl);
+        if (!resp.ok) throw new Error("Could not load sample image: " + resp.statusText);
+        const blob = await resp.blob();
+        const filename = sampleUrl.substring(sampleUrl.lastIndexOf("/") + 1);
+        const file = new File([blob], filename, { type: "image/jpeg" });
+        uploadFile(file);
+      } catch (err) {
+        if (uploadResult) {
+          uploadResult.innerHTML = `<div style="color: #ef4444; font-size: 12px; padding: 8px;">⚠️ Sample load error: ${err.message}</div>`;
+        }
+      }
+    });
+  });
+
+  // Live flight HUD telemetry simulation (realistic drone telemetry variations)
+  const hudAltVal = document.getElementById("hud-alt-val");
+  const hudSpdVal = document.getElementById("hud-spd-val");
+  const hudFpsVal = document.getElementById("hud-fps-val");
+  setInterval(() => {
+    if (hudAltVal) {
+      hudAltVal.textContent = (28.2 + Math.random() * 0.6).toFixed(1) + "m";
+    }
+    if (hudSpdVal) {
+      hudSpdVal.textContent = (7.0 + Math.random() * 0.4).toFixed(1) + " m/s";
+    }
+    if (hudFpsVal) {
+      hudFpsVal.textContent = String(29 + Math.floor(Math.random() * 2));
+    }
+  }, 1800);
 
   // Init
   if (backendUrl) setBackend(backendUrl);

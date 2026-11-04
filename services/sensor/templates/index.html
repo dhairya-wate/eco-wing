@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>EcoWing | Waste Detection & Live Stream Center</title>
+  <title>EcoWing | Autonomous Aerial Waste Detection & Live Stream Mission Center</title>
   <!-- Mobile Auto-Redirect to Dedicated Mobile Broadcaster -->
   <script>
     if (/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) && !window.location.search.includes('desktop=1')) {
@@ -31,7 +31,7 @@
         </div>
         <div>
           <h1 class="brand-title">EcoWing <span>AI Detection</span></h1>
-          <p class="brand-subtitle">Automated Waste Sorting & Live Website Streaming</p>
+          <p class="brand-subtitle">Autonomous Aerial Waste Recon &amp; Live Telemetry Portal</p>
         </div>
       </div>
 
@@ -152,6 +152,30 @@
 
         <!-- Video Viewport: Supports both local device camera <canvas> and incoming <img id="stream-img"> -->
         <div class="video-container" id="video-wrapper">
+          <!-- Tactical Aerial HUD Corner Brackets -->
+          <div class="hud-corner tl"></div>
+          <div class="hud-corner tr"></div>
+          <div class="hud-corner bl"></div>
+          <div class="hud-corner br"></div>
+
+          <!-- Tactical Center Reticle Crosshair -->
+          <div class="hud-crosshair" id="hud-crosshair">
+            <div class="hud-crosshair-circle"></div>
+          </div>
+
+          <!-- Tactical HUD Floating Action Toolbar -->
+          <div class="hud-controls">
+            <button class="hud-btn" id="btn-hud-snapshot" title="Capture and Download Annotated Frame">
+              <span>📷</span> Snapshot
+            </button>
+            <button class="hud-btn" id="btn-hud-reticle" title="Toggle Tactical HUD Reticle">
+              <span>🎯</span> Reticle
+            </button>
+            <button class="hud-btn" id="btn-hud-night" title="Toggle FLIR Thermal Night Vision">
+              <span>🌙</span> Night
+            </button>
+          </div>
+
           <!-- Local Device Camera Video Element (Hidden offscreen, rendered with AI boxes onto canvas) -->
           <video id="device-video" autoplay playsinline muted style="display: none;"></video>
           <!-- Annotated AI Canvas (shows camera + glowing bounding boxes + classification tags) -->
@@ -162,6 +186,15 @@
           <img id="stream-img" src="/video_feed" alt="EcoWing Detection Live Stream" style="display: none; width: 100%; height: 100%; object-fit: contain;" />
           
           <div class="stream-overlay-tag" id="live-camera-tag">AI WASTE DETECTOR READY</div>
+
+          <!-- Tactical Telemetry Ticker Bar -->
+          <div class="hud-telemetry-bar">
+            <div class="hud-stat-item"><span class="hud-stat-label">ALT</span><span class="hud-stat-val" id="hud-alt-val">28.5m</span></div>
+            <div class="hud-stat-item"><span class="hud-stat-label">SPD</span><span class="hud-stat-val" id="hud-spd-val">7.2 m/s</span></div>
+            <div class="hud-stat-item"><span class="hud-stat-label">GPS</span><span class="hud-stat-val">16.8524° N, 74.5815° E</span></div>
+            <div class="hud-stat-item"><span class="hud-stat-label">GIMBAL</span><span class="hud-stat-val">-45° PITCH</span></div>
+            <div class="hud-stat-item"><span class="hud-stat-label">FPS</span><span class="hud-stat-val" id="hud-fps-val">30</span></div>
+          </div>
         </div>
 
         <!-- Destination Stream Relayer Bar -->
@@ -213,7 +246,7 @@
               <span class="connect-icon">📱</span>
               <div>
                 <h3>Stream From Mobile Phone</h3>
-                <p>Use your phone camera as a wireless AI waste scanner</p>
+                <p>Use your phone camera as a wireless aerial waste scanner</p>
               </div>
             </div>
           </div>
@@ -306,11 +339,19 @@ async function getWasteTelemetry() {
             <span class="count-pill" id="live-pill-count">0 Detected</span>
           </div>
 
+          <!-- Category Quick-Filter Bar -->
+          <div class="filter-bar" id="category-filter-bar">
+            <button class="filter-chip active" data-filter="all">All</button>
+            <button class="filter-chip" data-filter="recyclable">♻️ Recyclable</button>
+            <button class="filter-chip" data-filter="non-recyclable">🚫 Non-Rec</button>
+            <button class="filter-chip" data-filter="biodegradable">🌱 Bio</button>
+          </div>
+
           <div class="items-list" id="detected-items-container">
             <div class="empty-state">
               <span class="empty-icon">🔍</span>
               <p>No waste items in view</p>
-              <small>Point camera at paper, glass, can, cardboard, or food waste</small>
+              <small>Point camera at plastic, paper, glass, can, cardboard, or food waste</small>
             </div>
           </div>
         </div>
@@ -318,7 +359,7 @@ async function getWasteTelemetry() {
         <!-- Instant Image Test / Dropzone -->
         <div class="upload-card">
           <div class="upload-header">
-            <h4>Snapshot / Image File Test</h4>
+            <h4>Snapshot / Image File Test Lab</h4>
           </div>
           <div class="dropzone" id="dropzone">
             <input type="file" id="file-input" accept="image/*" style="display: none;" />
@@ -327,6 +368,25 @@ async function getWasteTelemetry() {
             <small>Supports Paper, Glass, Can, Cardboard, Plastic, etc.</small>
           </div>
           <div id="upload-result" class="upload-result hidden"></div>
+
+          <!-- Interactive Quick Test Waste Samples -->
+          <div class="sample-chips-row">
+            <span class="sample-chips-label">Quick Test Sample Waste:</span>
+            <div class="sample-chips-grid">
+              <button class="sample-chip" data-sample="/static/samples/sample_bottle.jpg">
+                <span>🍾</span> Plastic Bottle
+              </button>
+              <button class="sample-chip" data-sample="/static/samples/sample_cup.jpg">
+                <span>☕</span> Disposable Cup
+              </button>
+              <button class="sample-chip" data-sample="/static/samples/sample_organic.jpg">
+                <span>🍎</span> Organic Waste
+              </button>
+              <button class="sample-chip" data-sample="/static/samples/sample_paper.jpg">
+                <span>📄</span> Waste Paper
+              </button>
+            </div>
+          </div>
         </div>
       </div>
     </main>
@@ -335,4 +395,3 @@ async function getWasteTelemetry() {
   <script src="/static/js/main.js"></script>
 </body>
 </html>
-
