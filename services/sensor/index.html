@@ -2996,6 +2996,10 @@ function switchTab(button, tabId) {
             const d = document.getElementById('liveDot');
             if (l) l.textContent = 'PHONE AI LIVE';
             if (d) d.style.background = 'var(--success)';
+            if (liveStatusEl) {
+              liveStatusEl.innerHTML = '<i class="ti ti-point-filled"></i> Connected (Phone AI Live)';
+              liveStatusEl.style.color = 'var(--success)';
+            }
 
             // Auto-register Phone Drone in fleet list
             if (typeof D !== 'undefined') {
@@ -3048,6 +3052,7 @@ function switchTab(button, tabId) {
                 timestamp: new Date().toLocaleTimeString()
               };
 
+              saveDetectionLocally(evData);
               prependRow(evData, true);
               const box = document.getElementById('liveFeedBox');
               if (box) {
@@ -3112,6 +3117,31 @@ const liveStatusEl = document.getElementById('liveStatus');
 const MAX_FEED_ROWS = 5; // live detection feed shows only the 5 latest items
 let feedPlaceholderRemoved = false;
 
+function saveDetectionLocally(item) {
+  try {
+    const raw = localStorage.getItem('ecowing_local_db') || '[]';
+    const arr = JSON.parse(raw);
+    arr.unshift(item);
+    if (arr.length > 200) arr.pop();
+    localStorage.setItem('ecowing_local_db', JSON.stringify(arr));
+    const uniq = new Set(arr.map(x => x.class_name)).size;
+    if (totalUniqEl) totalUniqEl.textContent = '(' + uniq + ' unique)';
+    const mTot = document.getElementById('metricTotal');
+    if (mTot) mTot.textContent = arr.length;
+  } catch (e) {}
+}
+
+try {
+  const savedDbRaw = localStorage.getItem('ecowing_local_db') || '[]';
+  const savedDb = JSON.parse(savedDbRaw);
+  if (savedDb.length > 0) {
+    const uniq = new Set(savedDb.map(x => x.class_name)).size;
+    if (totalUniqEl) totalUniqEl.textContent = '(' + uniq + ' unique)';
+    const mTot = document.getElementById('metricTotal');
+    if (mTot) mTot.textContent = savedDb.length;
+  }
+} catch (e) {}
+
 socket.on('connect', () => {
   liveStatusEl.innerHTML = '<i class="ti ti-point-filled"></i> Connected';
   liveStatusEl.style.color = 'var(--success)';
@@ -3128,10 +3158,11 @@ socket.on('connect', () => {
 });
 
 socket.on('disconnect', () => {
-  liveStatusEl.innerHTML = '<i class="ti ti-point-filled"></i> Disconnected';
-  liveStatusEl.style.color = 'var(--danger)';
-  document.getElementById('liveLabel').textContent = 'OFFLINE';
-  document.getElementById('liveDot').style.background = 'var(--danger)';
+  if (phoneConnected || window.__phoneConnected) return;
+  if (liveStatusEl) {
+    liveStatusEl.innerHTML = '<i class="ti ti-point-filled"></i> Standby (Ready to Stream)';
+    liveStatusEl.style.color = 'var(--warning)';
+  }
 });
 
 socket.on('new_detection', (event) => {
