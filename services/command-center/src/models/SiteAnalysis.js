@@ -56,3 +56,4 @@ const siteAnalysisSchema = new mongoose.Schema(
 );
 
 module.exports = mongoose.model('SiteAnalysis', siteAnalysisSchema);
+

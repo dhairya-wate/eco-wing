@@ -1,10 +1,25 @@
 import sys
+from pathlib import Path
 
 # Ensure UTF-8 output on Windows consoles
 if sys.platform == "win32":
     try:
         sys.stdout.reconfigure(encoding='utf-8')
     except Exception:
+        pass
+
+# Ensure ecowing_sensor package in src is on sys.path
+sensor_pkg_dir = Path(__file__).resolve().parent / "src" / "ecowing_sensor"
+if sensor_pkg_dir.exists() and str(sensor_pkg_dir) not in sys.path:
+    sys.path.insert(0, str(sensor_pkg_dir))
+
+# Also load .env from current directory if present
+env_file = Path(__file__).resolve().parent / ".env"
+if env_file.exists():
+    try:
+        from dotenv import load_dotenv
+        load_dotenv(env_file)
+    except ImportError:
         pass
 
 import uvicorn

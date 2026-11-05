@@ -2092,7 +2092,6 @@ html:not(.authed) body{overflow:hidden}
         <div class="metric-sub" id="anaTopCount">most frequent</div>
         <div class="metric-trend"><i class="ti ti-crown"></i>Dominant</div>
       </div>
-    </div>
       <div class="metric-card">
         <div class="metric-label">Detection FPS</div>
         <div class="metric-value" id="anaFps"><span class="skel skel-value"></span></div>
@@ -4572,8 +4571,9 @@ fetch(_apiBasePrefix + '/api/events').then(r => r.json()).then(events => {
     document.querySelectorAll('.an-th').forEach(t=>{t.classList.toggle('asc',t.dataset.s===sortK&&sortD>0);t.classList.toggle('desc',t.dataset.s===sortK&&sortD<0)});
   }
   document.querySelectorAll('.an-th').forEach(t=>t.onclick=()=>{const k=t.dataset.s;if(k===sortK)sortD*=-1;else{sortK=k;sortD=k==='name'?1:-1}drawTable()});
-  $('anaQ').oninput=drawTable;$('anaMore').onclick=()=>{showAll=!showAll;drawTable()};
-  $('anaCsv').onclick=()=>{
+  if($('anaQ')) $('anaQ').oninput=drawTable;
+  if($('anaMore')) $('anaMore').onclick=()=>{showAll=!showAll;drawTable()};
+  if($('anaCsv')) $('anaCsv').onclick=()=>{
     if(!rows.length && typeof sessionStore !== 'undefined' && sessionStore.classCounts){
       const counts=sessionStore.classCounts;
       const sorted=Object.entries(counts).sort((a,b)=>b[1]-a[1]);
