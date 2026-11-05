@@ -5,6 +5,7 @@ const crypto = require('crypto');
 const net = require('net');
 const dns = require('dns');
 const Detection = require('../models/Detection');
+const { inferDualAxisClassification } = require('../models/Detection');
 const Drone = require('../models/Drone');
 const Telemetry = require('../models/Telemetry');
 const { broadcastFrame } = require('../videoStream');
@@ -498,19 +499,19 @@ router.post('/detection', verifyDroneToken, ingestionRateLimiter, async (req, re
 
       for (const item of data.items) {
         const rawClass = String(item.class_id).toLowerCase();
-        let recyclable = false;
+        const eco = inferDualAxisClassification(rawClass, item);
         let category = item.category || 'General';
         const recClasses = ['bottle', 'can', 'cup', 'plastic', 'glass', 'paper', 'cardboard', 'metal'];
         if (recClasses.some(c => rawClass.includes(c))) {
-          recyclable = true;
           if (rawClass.includes('plastic') || rawClass.includes('bottle')) category = 'Plastic';
           else if (rawClass.includes('metal') || rawClass.includes('can')) category = 'Metal';
           else if (rawClass.includes('glass')) category = 'Glass';
           else if (rawClass.includes('paper') || rawClass.includes('cardboard')) category = 'Paper';
         }
-        if (item.recyclable !== undefined) {
-          recyclable = ['yes', 'estimated'].includes(String(item.recyclable).toLowerCase());
-        }
+
+        const center = (Array.isArray(item.bbox) && item.bbox.length === 4)
+          ? [Math.round((item.bbox[1] + item.bbox[3]) / 2), Math.round((item.bbox[0] + item.bbox[2]) / 2)]
+          : [320, 240];
 
         const eventPayload = {
           event_id: nextEventId++,
@@ -522,8 +523,13 @@ router.post('/detection', verifyDroneToken, ingestionRateLimiter, async (req, re
           confidence: item.confidence,
           category: category,
           material: item.material || 'unknown',
-          recyclable: recyclable,
-          biodegradable: ['yes', 'estimated'].includes(String(item.biodegradable).toLowerCase()),
+          material_type: eco.material_type,
+          is_recyclable: eco.is_recyclable,
+          is_biodegradable: eco.is_biodegradable,
+          recyclable: eco.recyclable,
+          biodegradable: eco.biodegradable,
+          disposal_bin: eco.disposal_bin,
+          center: center,
           bbox: item.bbox,
           location: { lat: 19.0760, lng: 72.8777 },
           imageUrl: data.imageUrl || data.image_url || '',
@@ -584,13 +590,23 @@ router.post('/detection', verifyDroneToken, ingestionRateLimiter, async (req, re
       lng = data.longitude;
     }
 
+    const eco = inferDualAxisClassification(rawClass, data);
+    const isRec = data.is_recyclable !== undefined ? Boolean(data.is_recyclable) : (data.recyclable !== undefined ? Boolean(data.recyclable) : eco.is_recyclable);
+    const isBio = data.is_biodegradable !== undefined ? Boolean(data.is_biodegradable) : (data.biodegradable !== undefined ? Boolean(data.biodegradable) : eco.is_biodegradable);
+
     const eventPayload = {
       event_id: nextEventId++,
       drone_id: data.drone_id || 'EcoWing-01',
       class_name: rawClass,
       confidence: typeof data.confidence === 'number' ? data.confidence : 0.85,
       category: data.category || category,
-      recyclable: data.recyclable !== undefined ? Boolean(data.recyclable) : recyclable,
+      material_type: eco.material_type,
+      is_recyclable: isRec,
+      is_biodegradable: isBio,
+      recyclable: isRec ? 'yes' : 'no',
+      biodegradable: isBio ? 'yes' : 'no',
+      disposal_bin: eco.disposal_bin,
+      center: [320, 240],
       location: { lat, lng },
       imageUrl: data.imageUrl || data.image_url || '',
       verified: false,

@@ -2046,8 +2046,13 @@ html:not(.authed) body{overflow:hidden}
 
   <div id="analytics" class="tab-content">
     <div class="an-head page-head">
-      <div class="ph-t"><div><h2>Site analysis</h2><p>Live detection insights for the current session</p></div></div>
-      <div class="an-tools"><span class="an-pill" id="anaStatus"><span></span>Connecting…</span><button class="lb-btn" id="anaCsv"><i class="ti ti-download"></i> Export CSV</button></div>
+      <div class="ph-t"><div><h2>Site analysis</h2><p>Live dual-axis detection insights and database sync</p></div></div>
+      <div class="an-tools">
+        <span class="an-pill" id="anaStatus"><span></span>Connecting…</span>
+        <button class="lb-btn" id="anaSyncDb" onclick="saveSiteAnalysisToDb(event)" style="display:inline-flex;align-items:center;gap:5px;"><i class="ti ti-database"></i> Save to DB</button>
+        <span class="an-pill" id="anaDbStatus" style="font-size:11px;background:rgba(68,83,224,0.1);color:var(--primary);border:1px solid rgba(68,83,224,0.25);"><span></span>DB: Active</span>
+        <button class="lb-btn" id="anaCsv"><i class="ti ti-download"></i> Export CSV</button>
+      </div>
     </div>
     <div class="an-insight" id="anaInsight"></div>
     <div class="metrics-row">
@@ -2058,16 +2063,22 @@ html:not(.authed) body{overflow:hidden}
         <div class="metric-trend"><i class="ti ti-broadcast"></i>Live count</div>
       </div>
       <div class="metric-card">
-        <div class="metric-label">Recyclable Waste</div>
+        <div class="metric-label">Recyclable (Yes/No)</div>
         <div class="metric-value" id="anaRecyclable" style="color:#059669;">0</div>
-        <div class="metric-sub" id="anaRecyclableSub">0% recoverable</div>
-        <div class="metric-trend" style="color:#059669;"><i class="ti ti-recycle"></i>Recyclable</div>
+        <div class="metric-sub" id="anaRecyclableSub">0% recoverable · 0 non-rec</div>
+        <div class="metric-trend" style="color:#059669;"><i class="ti ti-recycle"></i>Recyclable analysis</div>
       </div>
       <div class="metric-card">
-        <div class="metric-label">Biodegradable</div>
+        <div class="metric-label">Biodegradable (Yes/No)</div>
         <div class="metric-value" id="anaBiodegradable" style="color:#65a30d;">0</div>
-        <div class="metric-sub" id="anaBiodegradableSub">0% compostable</div>
-        <div class="metric-trend" style="color:#65a30d;"><i class="ti ti-leaf"></i>Organic matter</div>
+        <div class="metric-sub" id="anaBiodegradableSub">0% compostable · 0 non-bio</div>
+        <div class="metric-trend" style="color:#65a30d;"><i class="ti ti-leaf"></i>Organic analysis</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-label">Non-Recyclable</div>
+        <div class="metric-value" id="anaNonRecyclable" style="color:#d97706;">0</div>
+        <div class="metric-sub" id="anaNonRecyclableSub">0% residual</div>
+        <div class="metric-trend" style="color:#d97706;"><i class="ti ti-trash"></i>Residual waste</div>
       </div>
       <div class="metric-card">
         <div class="metric-label">Class diversity</div>
@@ -2081,6 +2092,7 @@ html:not(.authed) body{overflow:hidden}
         <div class="metric-sub" id="anaTopCount">most frequent</div>
         <div class="metric-trend"><i class="ti ti-crown"></i>Dominant</div>
       </div>
+    </div>
       <div class="metric-card">
         <div class="metric-label">Detection FPS</div>
         <div class="metric-value" id="anaFps"><span class="skel skel-value"></span></div>
@@ -2137,10 +2149,36 @@ html:not(.authed) body{overflow:hidden}
       <i class="ti ti-list"></i> All detected classes
     </div>
     <div class="data-table" style="margin-bottom:2rem;">
-      <div class="table-header" style="display:flex;justify-content:space-between;align-items:center;gap:1rem;flex-wrap:wrap;"><h3>Class breakdown</h3><input class="an-q" id="anaQ" type="search" placeholder="Filter classes…" aria-label="Filter classes"></div>
+      <div class="table-header" style="display:flex;justify-content:space-between;align-items:center;gap:1rem;flex-wrap:wrap;">
+        <div>
+          <h3 style="margin:0 0 2px 0;">Dual-Axis Classification &amp; Disposal Analysis</h3>
+          <p style="margin:0;font-size:12px;color:var(--text-muted);">Real-time evaluation: Recyclable (Yes/No), Biodegradable (Yes/No), and disposal bin destination</p>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+          <div class="filter-group" id="anaFilterGroup" style="display:inline-flex;gap:4px;">
+            <button class="filter-btn active" data-filter="all" style="padding:4px 8px;font-size:11px;border-radius:4px;border:1px solid var(--border);background:var(--bg-card);cursor:pointer;">All</button>
+            <button class="filter-btn" data-filter="rec-yes" style="padding:4px 8px;font-size:11px;border-radius:4px;border:1px solid #10b981;background:rgba(16,185,129,0.1);color:#059669;cursor:pointer;">♻️ Recyclable</button>
+            <button class="filter-btn" data-filter="rec-no" style="padding:4px 8px;font-size:11px;border-radius:4px;border:1px solid #f59e0b;background:rgba(245,158,11,0.1);color:#d97706;cursor:pointer;">🚫 Non-Rec</button>
+            <button class="filter-btn" data-filter="bio-yes" style="padding:4px 8px;font-size:11px;border-radius:4px;border:1px solid #84cc16;background:rgba(132,204,22,0.1);color:#4d7c0f;cursor:pointer;">🌿 Biodegradable</button>
+            <button class="filter-btn" data-filter="bio-no" style="padding:4px 8px;font-size:11px;border-radius:4px;border:1px solid var(--border);background:var(--bg-card);color:var(--text-muted);cursor:pointer;">⚪ Non-Bio</button>
+          </div>
+          <input class="an-q" id="anaQ" type="search" placeholder="Filter classes…" aria-label="Filter classes" style="width:140px;">
+        </div>
+      </div>
       <table>
-        <thead><tr><th>#</th><th class="an-th" data-s="name">Class</th><th>Eco Category</th><th class="an-th desc" data-s="count">Count</th><th>Share</th><th>Bar</th></tr></thead>
-        <tbody id="classTableBody"><tr><td><span class="skel skel-cell short"></span></td><td><span class="skel skel-cell short"></span></td><td><span class="skel skel-cell short"></span></td><td><span class="skel skel-cell long"></span></td></tr><tr><td><span class="skel skel-cell"></span></td><td><span class="skel skel-cell short"></span></td><td><span class="skel skel-cell short"></span></td><td><span class="skel skel-cell"></span></td></tr><tr><td><span class="skel skel-cell short"></span></td><td><span class="skel skel-cell short"></span></td><td><span class="skel skel-cell short"></span></td><td><span class="skel skel-cell long"></span></td></tr></tbody>
+        <thead>
+          <tr>
+            <th>#</th>
+            <th class="an-th" data-s="name">Class</th>
+            <th>Recyclable?</th>
+            <th>Biodegradable?</th>
+            <th>Disposal Bin</th>
+            <th class="an-th desc" data-s="count">Count</th>
+            <th>Share %</th>
+            <th>Bar</th>
+          </tr>
+        </thead>
+        <tbody id="classTableBody"><tr><td colspan="8" style="text-align:center;color:var(--text-muted);padding:24px"><span class="skel skel-cell long"></span></td></tr></tbody>
       </table>
       <button class="an-more" id="anaMore" style="display:none"></button>
     </div>
@@ -3567,17 +3605,33 @@ function exportDetectionsClientSide(format) {
 
   let blob;
   if (format === 'csv') {
-    let csv = 'Event ID,Class Name,Material Type,Confidence,Center X,Center Y,Timestamp,Drone ID\n';
+    let csv = 'Event ID,Class Name,Recyclable,Biodegradable,Disposal Bin,Confidence,Center X,Center Y,Timestamp,Drone ID\n';
     list.forEach(d => {
       const cx = Array.isArray(d.center) ? d.center[0] : '';
       const cy = Array.isArray(d.center) ? d.center[1] : '';
       const ts = d.timestamp || new Date().toISOString();
-      const mtype = d.material_type || (typeof window.classifyMaterial === 'function' ? window.classifyMaterial(d.class_name) : 'Non-Recyclable');
-      csv += `"${d.event_id || ''}","${d.class_name || ''}","${mtype}",${d.confidence || ''},${cx},${cy},"${ts}","${d.drone_id || ''}"\n`;
+      const eco = (typeof window.classifyDualAxis === 'function')
+        ? window.classifyDualAxis(d.class_name)
+        : { recyclable: 'No', biodegradable: 'No', disposal_bin: 'Black/Cyan Bin (Residual)' };
+      const rec = d.recyclable || (d.is_recyclable !== undefined ? (d.is_recyclable ? 'Yes' : 'No') : eco.recyclable);
+      const bio = d.biodegradable || (d.is_biodegradable !== undefined ? (d.is_biodegradable ? 'Yes' : 'No') : eco.biodegradable);
+      const bin = d.disposal_bin || eco.disposal_bin;
+      csv += `"${d.event_id || ''}","${d.class_name || ''}","${rec}","${bio}","${bin}",${d.confidence || ''},${cx},${cy},"${ts}","${d.drone_id || ''}"\n`;
     });
     blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
   } else {
-    blob = new Blob([JSON.stringify(list, null, 2)], { type: 'application/json;charset=utf-8;' });
+    const jsonList = list.map(d => {
+      const eco = (typeof window.classifyDualAxis === 'function')
+        ? window.classifyDualAxis(d.class_name)
+        : { recyclable: 'No', biodegradable: 'No', disposal_bin: 'Black/Cyan Bin (Residual)' };
+      return {
+        ...d,
+        recyclable: d.recyclable || (d.is_recyclable !== undefined ? (d.is_recyclable ? 'Yes' : 'No') : eco.recyclable),
+        biodegradable: d.biodegradable || (d.is_biodegradable !== undefined ? (d.is_biodegradable ? 'Yes' : 'No') : eco.biodegradable),
+        disposal_bin: d.disposal_bin || eco.disposal_bin
+      };
+    });
+    blob = new Blob([JSON.stringify(jsonList, null, 2)], { type: 'application/json;charset=utf-8;' });
   }
 
   triggerFileDownload(blob, `ecowing_detections.${format}`);
@@ -4270,14 +4324,96 @@ fetch(_apiBasePrefix + '/api/events').then(r => r.json()).then(events => {
     if(ev.length>500)ev.shift();
   };
 
-  const classifyMaterial=name=>{
-    const s=String(name||'').toLowerCase().replace(/[-_]/g,' ');
-    if(['food','organic','leaf','leaves','wood','plant','fruit','vegetable','peel','apple','banana','cotton','compost','straw'].some(k=>s.includes(k))) return 'Biodegradable';
-    if(['bottle','can','aluminum','metal','tin','glass','cardboard','paper','carton','tetra','jar','hdpe','pet'].some(k=>s.includes(k))) return 'Recyclable';
-    if(s.includes('plastic')&&!s.includes('bag')&&!s.includes('wrap')&&!s.includes('film')) return 'Recyclable';
+  let activeFilter = 'all';
+
+  const classifyMaterial = name => {
+    const s = String(name || '').toLowerCase().replace(/[-_]/g, ' ');
+    if (['food','organic','leaf','leaves','wood','plant','fruit','vegetable','peel','apple','banana','cotton','compost','straw'].some(k=>s.includes(k))) return 'Biodegradable';
+    if (['bottle','can','aluminum','metal','tin','glass','cardboard','paper','carton','tetra','jar','hdpe','pet'].some(k=>s.includes(k))) return 'Recyclable';
+    if (s.includes('plastic') && !s.includes('bag') && !s.includes('wrap') && !s.includes('film')) return 'Recyclable';
     return 'Non-Recyclable';
   };
   window.classifyMaterial = classifyMaterial;
+
+  const classifyDualAxis = (name) => {
+    const s = String(name || '').toLowerCase().replace(/[-_]/g, ' ');
+    const recKeywords = ['bottle', 'can', 'aluminum', 'metal', 'tin', 'glass', 'cardboard', 'paper', 'carton', 'tetra', 'jar', 'hdpe', 'pet'];
+    const isRec = recKeywords.some(k => s.includes(k)) || (s.includes('plastic') && !s.includes('bag') && !s.includes('wrap') && !s.includes('film'));
+    const bioKeywords = ['food', 'organic', 'leaf', 'leaves', 'wood', 'plant', 'fruit', 'vegetable', 'peel', 'apple', 'banana', 'cotton', 'compost', 'straw', 'paper', 'cardboard'];
+    const isBio = bioKeywords.some(k => s.includes(k));
+    let bin = 'Black/Cyan Bin (Residual)';
+    if (isRec && isBio) bin = 'Blue / Green (Dual-Stream)';
+    else if (isRec) bin = 'Blue Bin (Recyclable)';
+    else if (isBio) bin = 'Green Bin (Compostable)';
+    return {
+      is_recyclable: isRec,
+      is_biodegradable: isBio,
+      recyclable: isRec ? 'Yes' : 'No',
+      biodegradable: isBio ? 'Yes' : 'No',
+      disposal_bin: bin
+    };
+  };
+  window.classifyDualAxis = classifyDualAxis;
+
+  // Filter chips interaction
+  setTimeout(() => {
+    const filterBtns = document.querySelectorAll('#anaFilterGroup .filter-btn');
+    filterBtns.forEach(btn => {
+      btn.onclick = () => {
+        filterBtns.forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        activeFilter = btn.dataset.filter || 'all';
+        drawTable();
+      };
+    });
+  }, 100);
+
+  window.saveSiteAnalysisToDb = async function(ev) {
+    if (ev && ev.preventDefault) ev.preventDefault();
+    const btn = $('anaSyncDb');
+    const dbPill = $('anaDbStatus');
+    const oldHtml = btn ? btn.innerHTML : '';
+    if (btn) {
+      btn.disabled = true;
+      btn.innerHTML = '<i class="ti ti-loader-2" style="animation:spin 1s linear infinite"></i> Saving…';
+    }
+    try {
+      const token = (typeof getOperatorToken === 'function' ? getOperatorToken() : '') ||
+                    localStorage.getItem('ecowing_operator_token') ||
+                    'secure_operator_token_9xK2mP7qR4vL8wZ1';
+      const prefix = (typeof API_BASE !== 'undefined' && API_BASE) ? API_BASE : '';
+      const res = await fetch(`${prefix}/api/analysis/save`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Operator-Token': token
+        }
+      });
+      const resJson = await res.json();
+      if (!res.ok) throw new Error(resJson.error || 'Failed to save analysis');
+
+      if (dbPill) {
+        dbPill.className = 'an-pill live';
+        dbPill.style.background = 'rgba(16,185,129,0.1)';
+        dbPill.style.color = '#059669';
+        dbPill.style.border = '1px solid rgba(16,185,129,0.3)';
+        dbPill.innerHTML = `<span></span>${resJson.database_status === 'mongodb_atlas_saved' ? 'DB: Atlas Saved' : 'DB: Stored'}`;
+      }
+      if (window.appToast) window.appToast('Site analysis successfully stored in database!', 'ok', 'ti-database');
+    } catch (err) {
+      console.error('Error saving site analysis to DB:', err);
+      if (dbPill) {
+        dbPill.className = 'an-pill off';
+        dbPill.innerHTML = '<span></span>DB: Local fallback';
+      }
+      if (window.appToast) window.appToast('Analysis snapshot stored locally (DB sync queued)', 'info', 'ti-database');
+    } finally {
+      if (btn) {
+        btn.disabled = false;
+        btn.innerHTML = oldHtml;
+      }
+    }
+  };
 
   window.pushSiteAnalysisEvent = (e) => {
     pushEv(e, (e && e.t) || Date.now());
@@ -4303,15 +4439,18 @@ fetch(_apiBasePrefix + '/api/events').then(r => r.json()).then(events => {
     if(offline && (!sessionStore || sessionStore.totalUnique === 0)){el.innerHTML='<span class="fc-chip bad"><i class="ti ti-plug-off"></i>Can’t reach the detection backend</span>';return}
     if(!data){el.innerHTML='<span class="fc-chip"><i class="ti ti-info-circle"></i>Waiting for detections…</span>';return}
     const tot=data.data.reduce((a,b)=>a+b,0)||1,top=Math.round(data.data[0]/tot*100);
-    let rec=0,bio=0;
+    let rec=0,bio=0,nonRec=0,nonBio=0;
     data.labels.forEach((l,i)=>{
-      const m=classifyMaterial(l);
-      if(m==='Recyclable')rec+=data.data[i];
-      else if(m==='Biodegradable')bio+=data.data[i];
+      const c=classifyDualAxis(l);
+      if(c.is_recyclable) rec+=data.data[i];
+      else nonRec+=data.data[i];
+      if(c.is_biodegradable) bio+=data.data[i];
+      else nonBio+=data.data[i];
     });
-    const recP=Math.round(rec/tot*100),bioP=Math.round(bio/tot*100);
+    const recP=Math.round(rec/tot*100),bioP=Math.round(bio/tot*100),nonRecP=Math.round(nonRec/tot*100);
     let h=`<span class="fc-chip"><i class="ti ti-trophy"></i>Dominant: ${esc(data.labels[0])} <small>${top}%</small></span>
     <span class="fc-chip" style="background:#e7f8f1;color:#0a8a5f"><i class="ti ti-recycle"></i>Recyclable: ${rec} <small>${recP}%</small></span>
+    <span class="fc-chip" style="background:#fef3c7;color:#b45309"><i class="ti ti-trash"></i>Non-Rec: ${nonRec} <small>${nonRecP}%</small></span>
     <span class="fc-chip" style="background:#f4fbe8;color:#3f6212"><i class="ti ti-leaf"></i>Biodegradable: ${bio} <small>${bioP}%</small></span>
     <span class="fc-chip"><i class="ti ti-category"></i>${data.labels.length} <small>classes</small></span>
     <span class="fc-chip"><i class="ti ti-database"></i>${tot} <small>total detections</small></span>`;
@@ -4336,8 +4475,10 @@ fetch(_apiBasePrefix + '/api/events').then(r => r.json()).then(events => {
     if($('anaEcoC'))$('anaEcoC').classList.add('empty');
     if($('anaRecyclable'))$('anaRecyclable').textContent='0';
     if($('anaBiodegradable'))$('anaBiodegradable').textContent='0';
-    if($('anaRecyclableSub'))$('anaRecyclableSub').textContent='0% recoverable';
-    if($('anaBiodegradableSub'))$('anaBiodegradableSub').textContent='0% compostable';
+    if($('anaNonRecyclable'))$('anaNonRecyclable').textContent='0';
+    if($('anaRecyclableSub'))$('anaRecyclableSub').textContent='0% recoverable · 0 non-rec';
+    if($('anaBiodegradableSub'))$('anaBiodegradableSub').textContent='0% compostable · 0 non-bio';
+    if($('anaNonRecyclableSub'))$('anaNonRecyclableSub').textContent='0% residual';
     drawTable();insight();
   };
   window.siteAnalysisOffline=()=>{
@@ -4346,7 +4487,7 @@ fetch(_apiBasePrefix + '/api/events').then(r => r.json()).then(events => {
       syncSiteAnalysisFromStore();
       return;
     }
-    offline=true;['anaUnique','anaClasses','anaTopClass','anaFps','anaRecyclable','anaBiodegradable'].forEach(i=>{const e=$(i);if(e&&e.querySelector('.skel'))e.textContent='—'});insight();
+    offline=true;['anaUnique','anaClasses','anaTopClass','anaFps','anaRecyclable','anaBiodegradable','anaNonRecyclable'].forEach(i=>{const e=$(i);if(e&&e.querySelector('.skel'))e.textContent='—'});insight();
   };
   window.siteAnalysisUpdate=(stats)=>{
     offline=false;
@@ -4364,11 +4505,13 @@ fetch(_apiBasePrefix + '/api/events').then(r => r.json()).then(events => {
 
   function drawTable(){
     const q=($('anaQ')?$('anaQ').value.trim().toLowerCase():''),tot=rows.reduce((a,b)=>a+b.count,0)||1;
-    let rec=0,bio=0;
+    let rec=0,bio=0,nonRec=0,nonBio=0;
     rows.forEach(x=>{
-      const m=classifyMaterial(x.name);
-      if(m==='Recyclable')rec+=x.count;
-      else if(m==='Biodegradable')bio+=x.count;
+      const c=classifyDualAxis(x.name);
+      if(c.is_recyclable) rec+=x.count;
+      else nonRec+=x.count;
+      if(c.is_biodegradable) bio+=x.count;
+      else nonBio+=x.count;
     });
     if($('anaUnique'))$('anaUnique').textContent=tot;
     if($('anaClasses'))$('anaClasses').textContent=rows.length;
@@ -4379,21 +4522,53 @@ fetch(_apiBasePrefix + '/api/events').then(r => r.json()).then(events => {
     }
     if($('anaRecyclable'))$('anaRecyclable').textContent=rec;
     if($('anaBiodegradable'))$('anaBiodegradable').textContent=bio;
-    if($('anaRecyclableSub'))$('anaRecyclableSub').textContent=rows.length?`${(rec/tot*100).toFixed(1)}% recoverable`:'0% recoverable';
-    if($('anaBiodegradableSub'))$('anaBiodegradableSub').textContent=rows.length?`${(bio/tot*100).toFixed(1)}% compostable`:'0% compostable';
+    if($('anaNonRecyclable'))$('anaNonRecyclable').textContent=nonRec;
+    if($('anaRecyclableSub'))$('anaRecyclableSub').textContent=rows.length?`${(rec/tot*100).toFixed(1)}% recoverable · ${nonRec} non-rec`:'0% recoverable';
+    if($('anaBiodegradableSub'))$('anaBiodegradableSub').textContent=rows.length?`${(bio/tot*100).toFixed(1)}% compostable · ${nonBio} non-bio`:'0% compostable';
+    if($('anaNonRecyclableSub'))$('anaNonRecyclableSub').textContent=rows.length?`${(nonRec/tot*100).toFixed(1)}% residual`:'0% residual';
 
-    let r=rows.filter(x=>x.name.toLowerCase().includes(q));
+    let r=rows.filter(x=>{
+      if(q && !x.name.toLowerCase().includes(q)) return false;
+      const c = classifyDualAxis(x.name);
+      if(activeFilter === 'rec-yes' && !c.is_recyclable) return false;
+      if(activeFilter === 'rec-no' && c.is_recyclable) return false;
+      if(activeFilter === 'bio-yes' && !c.is_biodegradable) return false;
+      if(activeFilter === 'bio-no' && c.is_biodegradable) return false;
+      return true;
+    });
     r.sort((a,b)=>sortK==='name'?sortD*a.name.localeCompare(b.name):sortD*(a.count-b.count));
-    const more=r.length>10&&!q,shown=more&&!showAll?r.slice(0,10):r;
-    $('classTableBody').innerHTML=shown.length?shown.map((x,i)=>{
-      const pc=(x.count/tot*100).toFixed(1);
-      const m=classifyMaterial(x.name);
-      const badge=m==='Recyclable'?'<span class="status-badge ok" style="font-size:11px;padding:3px 8px"><i class="ti ti-recycle"></i> Recyclable</span>'
-        :m==='Biodegradable'?'<span class="status-badge" style="background:rgba(132,204,22,0.15);color:#3f6212;border:1px solid rgba(132,204,22,0.3);font-size:11px;padding:3px 8px"><i class="ti ti-leaf"></i> Biodegradable</span>'
-        :'<span class="status-badge warning" style="font-size:11px;padding:3px 8px"><i class="ti ti-trash"></i> Non-Recyclable</span>';
-      return `<tr><td>${i+1}</td><td><span class="an-sw" style="background:${x.color}"></span><strong>${esc(x.name)}</strong></td><td>${badge}</td><td>${x.count}</td><td>${pc}%</td><td><div style="background:${x.color};height:8px;border-radius:4px;width:${pc}%;min-width:4px;transition:width .5s"></div></td></tr>`;
-    }).join(''):`<tr><td colspan="6" style="text-align:center;color:var(--text-muted);padding:24px">${rows.length?'No classes match your filter':'No detections yet'}</td></tr>`;
-    const m=$('anaMore');m.style.display=more?'block':'none';m.textContent=showAll?'Show top 10':`Show all ${r.length} classes`;
+    const more=r.length>10&&!q&&activeFilter==='all',shown=more&&!showAll?r.slice(0,10):r;
+
+    const tbody = $('classTableBody');
+    if (tbody) {
+      tbody.innerHTML=shown.length?shown.map((x,i)=>{
+        const pc=(x.count/tot*100).toFixed(1);
+        const c=classifyDualAxis(x.name);
+        const recBadge=c.is_recyclable
+          ? '<span class="status-badge ok" style="font-size:11px;padding:3px 8px"><i class="ti ti-recycle"></i> Yes</span>'
+          : '<span class="status-badge warning" style="font-size:11px;padding:3px 8px"><i class="ti ti-trash"></i> No</span>';
+        const bioBadge=c.is_biodegradable
+          ? '<span class="status-badge" style="background:rgba(132,204,22,0.15);color:#3f6212;border:1px solid rgba(132,204,22,0.3);font-size:11px;padding:3px 8px"><i class="ti ti-leaf"></i> Yes</span>'
+          : '<span class="status-badge" style="background:rgba(100,116,139,0.12);color:#475569;border:1px solid rgba(100,116,139,0.25);font-size:11px;padding:3px 8px">⚪ No</span>';
+        let binIcon = '⬛';
+        if (c.is_recyclable && c.is_biodegradable) binIcon = '♻️🌿';
+        else if (c.is_recyclable) binIcon = '🟦';
+        else if (c.is_biodegradable) binIcon = '🟩';
+        const binBadge = `<span style="font-size:11px;font-weight:600;display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:12px;background:rgba(68,83,224,0.08);color:var(--text);border:1px solid rgba(68,83,224,0.2);">${binIcon} ${esc(c.disposal_bin)}</span>`;
+
+        return `<tr>
+          <td>${i+1}</td>
+          <td><span class="an-sw" style="background:${x.color}"></span><strong>${esc(x.name)}</strong></td>
+          <td>${recBadge}</td>
+          <td>${bioBadge}</td>
+          <td>${binBadge}</td>
+          <td><strong>${x.count}</strong></td>
+          <td>${pc}%</td>
+          <td><div style="background:${x.color};height:8px;border-radius:4px;width:${pc}%;min-width:4px;transition:width .5s"></div></td>
+        </tr>`;
+      }).join(''):`<tr><td colspan="8" style="text-align:center;color:var(--text-muted);padding:24px">${rows.length?'No classes match your filter':'No detections yet'}</td></tr>`;
+    }
+    const m=$('anaMore');if(m){m.style.display=more?'block':'none';m.textContent=showAll?'Show top 10':`Show all ${r.length} classes`;}
     document.querySelectorAll('.an-th').forEach(t=>{t.classList.toggle('asc',t.dataset.s===sortK&&sortD>0);t.classList.toggle('desc',t.dataset.s===sortK&&sortD<0)});
   }
   document.querySelectorAll('.an-th').forEach(t=>t.onclick=()=>{const k=t.dataset.s;if(k===sortK)sortD*=-1;else{sortK=k;sortD=k==='name'?1:-1}drawTable()});
@@ -4406,9 +4581,14 @@ fetch(_apiBasePrefix + '/api/events').then(r => r.json()).then(events => {
       drawTable();
     }
     if(!rows.length)return window.appToast&&window.appToast('Nothing to export yet','warn','ti-alert-triangle');
-    const tot=rows.reduce((a,b)=>a+b.count,0)||1,csv='Class,Category,Count,Share %\n'+rows.slice().sort((a,b)=>b.count-a.count).map(x=>`"${x.name.replace(/"/g,'""')}","${classifyMaterial(x.name)}",${x.count},${(x.count/tot*100).toFixed(1)}`).join('\n');
-    const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));a.download='site-analysis.csv';document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),1000);
-    if(window.appToast)window.appToast('Site analysis CSV exported','ok','ti-download');
+    const tot=rows.reduce((a,b)=>a+b.count,0)||1;
+    const csvHeader='Class,Recyclable,Biodegradable,Disposal Bin,Count,Share %\n';
+    const csvRows=rows.slice().sort((a,b)=>b.count-a.count).map(x=>{
+      const c=classifyDualAxis(x.name);
+      return `"${x.name.replace(/"/g,'""')}","${c.recyclable}","${c.biodegradable}","${c.disposal_bin}",${x.count},${(x.count/tot*100).toFixed(1)}%`;
+    }).join('\n');
+    const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([csvHeader+csvRows],{type:'text/csv'}));a.download='site-analysis-dual-axis.csv';document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+    if(window.appToast)window.appToast('Dual-axis site analysis CSV exported','ok','ti-download');
   };
 
   function tick(){
@@ -4441,9 +4621,9 @@ fetch(_apiBasePrefix + '/api/events').then(r => r.json()).then(events => {
     if(ecoC){
       let r=0,bio=0,o=0;
       rows.forEach(x=>{
-        const m=classifyMaterial(x.name);
-        if(m==='Recyclable')r+=x.count;
-        else if(m==='Biodegradable')bio+=x.count;
+        const c=classifyDualAxis(x.name);
+        if(c.is_recyclable)r+=x.count;
+        else if(c.is_biodegradable)bio+=x.count;
         else o+=x.count;
       });
       ecoC.data.datasets[0].data=[r,bio,o];

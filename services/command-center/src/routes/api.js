@@ -2,6 +2,8 @@ const express = require('express');
 const router = express.Router();
 const mongoose = require('mongoose');
 const Detection = require('../models/Detection');
+const SiteAnalysis = require('../models/SiteAnalysis');
+const { inferMaterialType, inferDualAxisClassification } = require('../models/Detection');
 const Drone = require('../models/Drone');
 const Telemetry = require('../models/Telemetry');
 const { getStreamStats } = require('../videoStream');
@@ -84,6 +86,22 @@ async function computeDashboardStats() {
 
   const isRunning = streamStats.isStreaming || (activeDroneDoc && ['Flying', 'flying'].includes(activeDroneDoc.status));
 
+  let recyclableCount = 0;
+  let nonRecyclableCount = 0;
+  let biodegradableCount = 0;
+  let nonBiodegradableCount = 0;
+  Object.entries(class_counts).forEach(([cname, count]) => {
+    const eco = inferDualAxisClassification(cname);
+    if (eco.is_recyclable) recyclableCount += count;
+    else nonRecyclableCount += count;
+    if (eco.is_biodegradable) biodegradableCount += count;
+    else nonBiodegradableCount += count;
+  });
+
+  const tot = totalUnique || 1;
+  const recyclablePct = Number(((recyclableCount / tot) * 100).toFixed(1));
+  const biodegradablePct = Number(((biodegradableCount / tot) * 100).toFixed(1));
+
   return {
     total_unique: totalUnique,
     active_tracks: streamStats.isStreaming ? 1 : 0,
@@ -91,6 +109,12 @@ async function computeDashboardStats() {
     running: Boolean(isRunning),
     class_counts: class_counts,
     material_counts: material_counts,
+    recyclable_count: recyclableCount,
+    non_recyclable_count: nonRecyclableCount,
+    biodegradable_count: biodegradableCount,
+    non_biodegradable_count: nonBiodegradableCount,
+    recyclable_percentage: recyclablePct,
+    biodegradable_percentage: biodegradablePct,
     telemetry: activeDroneDoc ? activeDroneDoc.telemetry : null,
     all_drones: all_drones
   };
@@ -123,15 +147,24 @@ router.get('/events', async (req, res) => {
           .limit(200);
 
         if (docs && docs.length > 0) {
-          const { inferMaterialType } = require('../models/Detection');
-          const events = docs.map(d => ({
-            event_id: d.event_id,
-            class_name: d.class_name,
-            material_type: d.material_type || inferMaterialType(d.class_name),
-            confidence: d.confidence,
-            center: d.center,
-            timestamp: d.timestamp
-          }));
+          const events = docs.map(d => {
+            const eco = inferDualAxisClassification(d.class_name, d);
+            return {
+              event_id: d.event_id,
+              canonical_event_id: d.canonical_event_id,
+              drone_id: d.drone_id,
+              class_name: d.class_name,
+              material_type: d.material_type || eco.material_type,
+              is_recyclable: d.is_recyclable !== undefined ? d.is_recyclable : eco.is_recyclable,
+              is_biodegradable: d.is_biodegradable !== undefined ? d.is_biodegradable : eco.is_biodegradable,
+              recyclable: d.recyclable || eco.recyclable,
+              biodegradable: d.biodegradable || eco.biodegradable,
+              disposal_bin: d.disposal_bin || eco.disposal_bin,
+              confidence: d.confidence,
+              center: d.center,
+              timestamp: d.timestamp
+            };
+          });
           return res.json(events);
         }
       } catch (e) {
@@ -144,6 +177,107 @@ router.get('/events', async (req, res) => {
   } catch (err) {
     console.error('Error fetching /api/events:', err);
     res.status(500).json({ error: 'Failed to fetch events' });
+  }
+});
+
+/**
+ * GET /api/analysis
+ * Comprehensive dual-axis site analysis: Recyclable (yes/no) & Biodegradable (yes/no)
+ */
+router.get('/analysis', async (req, res) => {
+  try {
+    const stats = await computeDashboardStats();
+    const classBreakdown = Object.entries(stats.class_counts).map(([name, count]) => {
+      const eco = inferDualAxisClassification(name);
+      const total = stats.total_unique || 1;
+      return {
+        name,
+        count,
+        percentage: Number(((count / total) * 100).toFixed(1)),
+        is_recyclable: eco.is_recyclable,
+        is_biodegradable: eco.is_biodegradable,
+        recyclable: eco.recyclable,
+        biodegradable: eco.biodegradable,
+        material_type: eco.material_type,
+        disposal_bin: eco.disposal_bin
+      };
+    }).sort((a, b) => b.count - a.count);
+
+    const payload = {
+      total_detections: stats.total_unique,
+      recyclable_count: stats.recyclable_count,
+      non_recyclable_count: stats.non_recyclable_count,
+      biodegradable_count: stats.biodegradable_count,
+      non_biodegradable_count: stats.non_biodegradable_count,
+      recyclable_percentage: stats.recyclable_percentage,
+      biodegradable_percentage: stats.biodegradable_percentage,
+      classes: classBreakdown,
+      database_connected: mongoose.connection.readyState === 1,
+      timestamp: new Date().toISOString()
+    };
+
+    res.json(payload);
+  } catch (err) {
+    console.error('Error fetching /api/analysis:', err);
+    res.status(500).json({ error: 'Failed to generate site analysis' });
+  }
+});
+
+/**
+ * POST /api/analysis/save
+ * Explicitly store current site analysis report snapshot in MongoDB Atlas
+ */
+router.post('/analysis/save', async (req, res) => {
+  try {
+    const stats = await computeDashboardStats();
+    const classBreakdown = Object.entries(stats.class_counts).map(([name, count]) => {
+      const eco = inferDualAxisClassification(name);
+      return {
+        name,
+        count,
+        is_recyclable: eco.is_recyclable,
+        is_biodegradable: eco.is_biodegradable,
+        category: eco.material_type,
+        disposal_bin: eco.disposal_bin
+      };
+    });
+
+    const docData = {
+      total_detections: stats.total_unique,
+      recyclable_count: stats.recyclable_count,
+      non_recyclable_count: stats.non_recyclable_count,
+      biodegradable_count: stats.biodegradable_count,
+      non_biodegradable_count: stats.non_biodegradable_count,
+      recyclable_percentage: stats.recyclable_percentage,
+      biodegradable_percentage: stats.biodegradable_percentage,
+      classes: classBreakdown,
+      source: req.body?.source || 'ecowing_command_center',
+      timestamp: new Date()
+    };
+
+    let savedId = null;
+    let dbStatus = 'persistent_store_only';
+
+    if (mongoose.connection.readyState === 1) {
+      try {
+        const savedDoc = await SiteAnalysis.create(docData);
+        savedId = savedDoc._id;
+        dbStatus = 'mongodb_atlas_saved';
+      } catch (dbErr) {
+        console.warn('Could not save to SiteAnalysis collection:', dbErr.message);
+      }
+    }
+
+    res.json({
+      success: true,
+      message: 'Site analysis snapshot successfully stored',
+      database_status: dbStatus,
+      record_id: savedId,
+      data: docData
+    });
+  } catch (err) {
+    console.error('Error in /api/analysis/save:', err);
+    res.status(500).json({ error: 'Failed to store site analysis' });
   }
 });
 
@@ -641,11 +775,15 @@ router.get('/export/csv', verifyOperatorToken, async (req, res) => {
       docs = detectionStore.getEvents(200);
     }
     
-    let csv = 'Event ID,Class Name,Confidence,Center X,Center Y,Timestamp,Drone ID\n';
+    let csv = 'Event ID,Class Name,Recyclable,Biodegradable,Disposal Bin,Confidence,Center X,Center Y,Timestamp,Drone ID\n';
     docs.forEach(d => {
       const cx = Array.isArray(d.center) ? d.center[0] : '';
       const cy = Array.isArray(d.center) ? d.center[1] : '';
-      csv += `"${d.event_id}","${d.class_name}",${d.confidence},${cx},${cy},"${d.timestamp}","${d.drone_id || ''}"\n`;
+      const eco = inferDualAxisClassification(d.class_name, d);
+      const rec = d.recyclable || eco.recyclable;
+      const bio = d.biodegradable || eco.biodegradable;
+      const bin = d.disposal_bin || eco.disposal_bin;
+      csv += `"${d.event_id}","${d.class_name}","${rec}","${bio}","${bin}",${d.confidence},${cx},${cy},"${d.timestamp}","${d.drone_id || ''}"\n`;
     });
 
     res.setHeader('Content-Type', 'text/csv');
@@ -673,14 +811,22 @@ router.get('/export/json', verifyOperatorToken, async (req, res) => {
     } else {
       docs = detectionStore.getEvents(200);
     }
-    const data = docs.map(d => ({
-      event_id: d.event_id,
-      class_name: d.class_name,
-      confidence: d.confidence,
-      center: d.center,
-      timestamp: d.timestamp,
-      drone_id: d.drone_id
-    }));
+    const data = docs.map(d => {
+      const eco = inferDualAxisClassification(d.class_name, d);
+      return {
+        event_id: d.event_id,
+        class_name: d.class_name,
+        is_recyclable: d.is_recyclable !== undefined ? d.is_recyclable : eco.is_recyclable,
+        is_biodegradable: d.is_biodegradable !== undefined ? d.is_biodegradable : eco.is_biodegradable,
+        recyclable: d.recyclable || eco.recyclable,
+        biodegradable: d.biodegradable || eco.biodegradable,
+        disposal_bin: d.disposal_bin || eco.disposal_bin,
+        confidence: d.confidence,
+        center: d.center,
+        timestamp: d.timestamp,
+        drone_id: d.drone_id
+      };
+    });
 
     res.setHeader('Content-Type', 'application/json');
     res.setHeader('Content-Disposition', 'attachment; filename="ecowing_detections.json"');
