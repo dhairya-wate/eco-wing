@@ -14,7 +14,17 @@
 <script src="/config.js"></script>
 <script>
   /* Deployment config: set apiBase to your backend origin if it is not served from the same host (e.g. "https://api.example.com"). */
-  window.DASHBOARD_CONFIG = Object.assign({ apiBase: '', demoLogin: false, googleClientId: '' }, window.DASHBOARD_CONFIG || {});
+  window.DASHBOARD_CONFIG = Object.assign({
+    apiBase: '',
+    demoLogin: true,
+    demoAccounts: {
+      admin: { password: ['password123', 'ecowing123'], name: 'Fleet Administrator', role: 'admin', email: 'admin@ecowing.local' },
+      operator: { password: ['password123', 'ecowing123'], name: 'Flight Operator', role: 'operator', email: 'operator@ecowing.local' },
+      sarah_pilot: { password: 'pilotpassword123', name: 'Capt. Sarah Jenkins', role: 'pilot', email: 'sarah.jenkins@ecowing.local' },
+      david_analyst: { password: 'analystpass123', name: 'David Chen', role: 'analyst', email: 'david.chen@ecowing.local' }
+    },
+    googleClientId: ''
+  }, window.DASHBOARD_CONFIG || {});
   var API_BASE = String(window.DASHBOARD_CONFIG.apiBase || '').replace(/\/$/, '');
 </script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -1631,6 +1641,7 @@ html:not(.authed) body{overflow:hidden}
         <div class="lg-err" id="lgErr" role="alert"></div>
         <button class="lg-btn" id="lgBtn" type="submit"><span id="lgBtnT">Sign in</span><i class="ti ti-arrow-right"></i></button>
         <div class="lg-switch">New to EcoWing? <button type="button" class="lg-forgot" data-go="up">Create an account</button></div>
+        <div class="lg-demo" id="lgDemoHint">Demo credentials: <button type="button" class="lg-forgot" id="lgDemoFill" style="font-weight:600;text-decoration:underline">admin / password123</button></div>
         <div class="lg-sso lg-sso-bottom">
           <div class="lg-or"><span>or</span></div>
           <button type="button" class="lg-social" data-gsi><svg class="gi" viewBox="0 0 48 48" aria-hidden="true" focusable="false"><path fill="#FFC107" d="M43.611 20.083H42V20H24v8h11.303c-1.649 4.657-6.08 8-11.303 8-6.627 0-12-5.373-12-12s5.373-12 12-12c3.059 0 5.842 1.154 7.961 3.039l5.657-5.657C34.046 6.053 29.268 4 24 4 12.955 4 4 12.955 4 24s8.955 20 20 20 20-8.955 20-20c0-2.641-.21-5.236-.611-7.743z"/><path fill="#FF3D00" d="M6.306 14.691l6.571 4.819C14.655 15.108 18.961 12 24 12c3.059 0 5.842 1.154 7.961 3.039l5.657-5.657C34.046 6.053 29.268 4 24 4 16.318 4 9.656 8.337 6.306 14.691z"/><path fill="#4CAF50" d="M24 44c5.166 0 9.86-1.977 13.409-5.192l-6.19-5.238C29.211 35.091 26.715 36 24 36c-5.202 0-9.619-3.317-11.283-7.946l-6.522 5.025C9.505 39.556 16.227 44 24 44z"/><path fill="#1976D2" d="M43.611 20.083H42V20H24v8h11.303c-.792 2.237-2.231 4.166-4.087 5.571l6.19 5.238C42.022 35.02 44 30.038 44 24c0-1.341-.138-2.65-.389-3.917z"/></svg>Continue with Google</button>
@@ -4155,7 +4166,23 @@ fetch(API_BASE + '/api/events').then(r => r.json()).then(events => {
     let h=5381;const t=salt+pw;for(let i=0;i<t.length;i++)h=((h<<5)+h+t.charCodeAt(i))>>>0;return 'x'+h.toString(16);
   }
   const EMAIL=/^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-  const byEmail=e=>{e=e.trim().toLowerCase();const o=users();for(const k of Object.keys(o))if((o[k].email||'').toLowerCase()===e)return k;return ''};
+  const checkBuiltinPass=(b,pw)=>{
+    if(!b)return false;
+    const exp=typeof b==='object'&&b!==null?(b.password||b.pass):b;
+    if(Array.isArray(exp))return exp.includes(pw);
+    return exp===pw;
+  };
+  const byEmail=e=>{
+    e=e.trim().toLowerCase();
+    const o=users();
+    for(const k of Object.keys(o))if((o[k].email||'').toLowerCase()===e)return k;
+    for(const k of Object.keys(BUILTIN)){
+      const b=BUILTIN[k],em=(b&&typeof b==='object'&&b.email)||(k+'@ecowing.local');
+      if(em&&em.toLowerCase()===e)return k;
+      if((k+'@ecowing.com')===e)return k;
+    }
+    return '';
+  };
   const taken=u=>has(BUILTIN,u)||has(users(),u);
   const syncProfile=(name,email)=>{
     try{const st=JSON.parse(localStorage.getItem('drone-settings')||'{}');st.pname=name||'';st.pemail=email||'';localStorage.setItem('drone-settings',JSON.stringify(st))}catch(e){}
@@ -4171,7 +4198,7 @@ fetch(API_BASE + '/api/events').then(r => r.json()).then(events => {
     const tick=()=>{if(n<=0){clearInterval(lockTimer);b.disabled=false;b.classList.remove('locked');t.textContent='Sign in';fails=0;$('lgErr').textContent='';return}t.textContent='Try again in '+n+'s';n--};
     tick();lockTimer=setInterval(tick,1000)};
   const hdrImg=document.querySelector('.header-icon img');if(hdrImg)$('lgLogo').src=hdrImg.src;
-  function show(){const u=get();if(u){const r=users()[u],nm=(r&&has(users(),u)&&r.name)||u;$('hdrUser').textContent=nm;$('hdrUserFull').textContent=nm;$('hdrAv').textContent=$('hdrAvBig').textContent=nm.charAt(0).toUpperCase();window.applyProfile&&window.applyProfile();root.classList.add('authed');setInert(false)}else{root.classList.remove('authed');setInert(true)}}
+  function show(){const u=get();if(u){const r=users()[u]||(has(BUILTIN,u)?(typeof BUILTIN[u]==='object'?BUILTIN[u]:{name:u}):null);const nm=(r&&r.name)||u;$('hdrUser').textContent=nm;$('hdrUserFull').textContent=nm;$('hdrAv').textContent=$('hdrAvBig').textContent=nm.charAt(0).toUpperCase();window.applyProfile&&window.applyProfile();root.classList.add('authed');setInert(false)}else{root.classList.remove('authed');setInert(true)}}
   function enter(u,keep,rec,force){
     fails=0;set(u,keep);
     let last=null;try{last=localStorage.getItem(LKEY)}catch(e){}
@@ -4239,13 +4266,23 @@ fetch(API_BASE + '/api/events').then(r => r.json()).then(events => {
     if(!raw||!p){err.textContent='Enter your username and password.';$('lgUserW').classList.toggle('invalid',!raw);$('lgPassW').classList.toggle('invalid',!p);$('lgUser').toggleAttribute('aria-invalid',!raw);$('lgPass').toggleAttribute('aria-invalid',!p);(raw?$('lgPass'):$('lgUser')).focus();return}
     const btn=$('lgBtn'),bt=$('lgBtnT');busy(btn,bt,true,'Signing in\u2026');err.textContent='';$('lgOk').hidden=true;
     let uname=raw.includes('@')?byEmail(raw):raw,ok=false,rec=null;
-    if(uname&&has(BUILTIN,uname))ok=BUILTIN[uname]===p;
+    if(uname&&has(BUILTIN,uname)){
+      const b=BUILTIN[uname];
+      ok=checkBuiltinPass(b,p);
+      if(ok)rec=typeof b==='object'&&b!==null?b:{name:uname,role:'admin'};
+    }
     else if(uname&&has(users(),uname)){rec=users()[uname];ok=!!rec.hash&&(await hash(p,rec.salt))===rec.hash}
     await sleep(350);
     busy(btn,bt,false,'Sign in');
     if(ok){enter(uname,$('lgKeep').checked,rec,false)}
     else{err.textContent='Incorrect username or password.';['lgUser','lgPass'].forEach(i=>$(i).setAttribute('aria-invalid','true'));$('lgUserW').classList.add('invalid');$('lgPassW').classList.add('invalid');shake();$('lgPass').select();if(++fails>=5){err.textContent='Too many attempts. Please wait before trying again.';lock(30)}}
   });
+  if($('lgDemoFill'))$('lgDemoFill').onclick=()=>{
+    $('lgUser').value='admin';
+    $('lgPass').value='password123';
+    clearInv();
+    $('lgBtn').focus();
+  };
   /* ---- Create account ---- */
   forms.up.addEventListener('submit',async e=>{
     e.preventDefault();

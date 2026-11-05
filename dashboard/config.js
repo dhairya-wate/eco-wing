@@ -7,8 +7,10 @@ window.DASHBOARD_CONFIG = Object.assign({
         : 'http://localhost:3000'),
   demoLogin: true,
   demoAccounts: {
-    admin: { password: 'password123', name: 'Fleet Administrator', role: 'admin' },
-    operator: { password: 'password123', name: 'Flight Operator', role: 'operator' }
+    admin: { password: ['password123', 'ecowing123'], name: 'Fleet Administrator', role: 'admin', email: 'admin@ecowing.local' },
+    operator: { password: ['password123', 'ecowing123'], name: 'Flight Operator', role: 'operator', email: 'operator@ecowing.local' },
+    sarah_pilot: { password: 'pilotpassword123', name: 'Capt. Sarah Jenkins', role: 'pilot', email: 'sarah.jenkins@ecowing.local' },
+    david_analyst: { password: 'analystpass123', name: 'David Chen', role: 'analyst', email: 'david.chen@ecowing.local' }
   },
   googleClientId: ''
 }, window.DASHBOARD_CONFIG || {});
