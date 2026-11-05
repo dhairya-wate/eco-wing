@@ -96,7 +96,7 @@ function validateMongoUriConfig(uri) {
 }
 
 // MongoDB Connection with auto-reconnect & serverless caching
-const ATLAS_URI = 'mongodb+srv://ecowing:ecowing-123@cluster0.nceyzqa.mongodb.net/ecowing?compressors=zlib&retryWrites=true&w=majority';
+const ATLAS_URI = 'mongodb+srv://ecowing:ecowing-123@cluster0.rsub9dy.mongodb.net/ecowing?retryWrites=true&w=majority';
 const MONGO_URI = process.env.MONGO_URI || process.env.MONGODB_URI || ATLAS_URI;
 
 // Enforce startup credential check
