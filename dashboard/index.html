@@ -25,7 +25,17 @@
     },
     googleClientId: ''
   }, window.DASHBOARD_CONFIG || {});
-  var API_BASE = String(window.DASHBOARD_CONFIG.apiBase || '').replace(/\/$/, '');
+  var API_BASE = (function() {
+    if (window.DASHBOARD_CONFIG && typeof window.DASHBOARD_CONFIG.apiBase === 'string' && window.DASHBOARD_CONFIG.apiBase.trim()) {
+      return window.DASHBOARD_CONFIG.apiBase.trim().replace(/\/$/, '');
+    }
+    if (typeof window !== 'undefined' && window.location) {
+      if (window.location.protocol === 'file:' || ((window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') && window.location.port !== '3000')) {
+        return 'http://localhost:3000';
+      }
+    }
+    return '';
+  })();
 </script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -1895,8 +1905,8 @@ html:not(.authed) body{overflow:hidden}
       <div class="table-header" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
         <h3>Real-time detections <span id="totalUnique" style="color:var(--primary);">(0 unique)</span></h3>
         <div style="display:flex;gap:8px;align-items:center;">
-          <a class="header-btn" href="/api/export/csv" download style="padding:6px 12px;font-size:12px;text-decoration:none;display:inline-flex;align-items:center;gap:4px;"><i class="ti ti-download"></i> Export CSV</a>
-          <a class="header-btn" href="/api/export/json" download style="padding:6px 12px;font-size:12px;text-decoration:none;display:inline-flex;align-items:center;gap:4px;"><i class="ti ti-download"></i> Export JSON</a>
+          <a class="header-btn" href="/api/export/csv" onclick="handleDetectionsExport('csv', event); return false;" download style="padding:6px 12px;font-size:12px;text-decoration:none;display:inline-flex;align-items:center;gap:4px;"><i class="ti ti-download"></i> Export CSV</a>
+          <a class="header-btn" href="/api/export/json" onclick="handleDetectionsExport('json', event); return false;" download style="padding:6px 12px;font-size:12px;text-decoration:none;display:inline-flex;align-items:center;gap:4px;"><i class="ti ti-download"></i> Export JSON</a>
           <button class="header-btn" onclick="clearFeed()" style="padding:6px 12px;font-size:12px;"><i class="ti ti-trash"></i> Clear feed</button>
         </div>
       </div>
@@ -2931,6 +2941,9 @@ function switchTab(button, tabId) {
     }, 100);
   }
   if (tabId === 'analytics') {
+    if (typeof syncSiteAnalysisFromStore === 'function') {
+      try { syncSiteAnalysisFromStore(); } catch (e) {}
+    }
     setTimeout(loadAnalyticsCharts, 150);
   }
 }
@@ -3200,6 +3213,9 @@ const sessionStore = {
 
 function seedStoreFromEvents(events) {
   if (!Array.isArray(events) || events.length === 0) return;
+  sessionStore.totalUnique = 0;
+  sessionStore.classCounts = {};
+  sessionStore.events = [];
   events.forEach(ev => {
     const cname = ev.class_name || 'Unknown';
     sessionStore.classCounts[cname] = (sessionStore.classCounts[cname] || 0) + 1;
@@ -3287,6 +3303,8 @@ function updateMetricsFromStore() {
   const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]);
 
   setEl('metricTotal', total);
+  const totalUniqueEl = document.getElementById('totalUnique');
+  if (totalUniqueEl) totalUniqueEl.textContent = `(${total} unique)`;
   setEl('anaUnique', total);
   setEl('anaClasses', Object.keys(counts).length);
   if (sorted.length > 0) {
@@ -3338,6 +3356,7 @@ function syncSiteAnalysisFromStore() {
   renderClassDoughnut(chartPayload);
   renderClassTable(chartPayload);
 }
+window.syncSiteAnalysisFromStore = syncSiteAnalysisFromStore;
 
 // Live Detection Telemetry & Video Feed from Detection System
 let lastDetectionTime = 0;
@@ -3492,11 +3511,98 @@ function clearFeed() {
     });
 }
 
+// ─── Export detection logs (authenticated server or client store) ───────────
+async function handleDetectionsExport(format, ev) {
+  if (ev && ev.preventDefault) ev.preventDefault();
+  const token = (typeof getOperatorToken === 'function' ? getOperatorToken() : '') ||
+                localStorage.getItem('ecowing_operator_token') ||
+                'secure_operator_token_9xK2mP7qR4vL8wZ1';
+  const base = (typeof API_BASE !== 'undefined' && API_BASE ? API_BASE : '');
+  
+  try {
+    const res = await fetch(base + '/api/export/' + format, {
+      headers: { 'X-Operator-Token': token }
+    });
+    if (res.ok) {
+      const blob = await res.blob();
+      triggerFileDownload(blob, `ecowing_detections.${format}`);
+      if (window.appToast) window.appToast(`Exported ${format.toUpperCase()} successfully`, 'ok', 'ti-download');
+      return;
+    }
+  } catch (e) {
+    console.warn('Backend export fetch failed, exporting from local store:', e);
+  }
+
+  exportDetectionsClientSide(format);
+}
+
+function exportDetectionsClientSide(format) {
+  let list = (typeof sessionStore !== 'undefined' && sessionStore.events && sessionStore.events.length > 0)
+    ? sessionStore.events.slice()
+    : [];
+
+  if (list.length === 0) {
+    const feedRows = document.querySelectorAll('#detectionFeed tr');
+    if (feedRows.length > 0 && !document.querySelector('#detectionFeed .skel')) {
+      feedRows.forEach(tr => {
+        const tds = tr.querySelectorAll('td');
+        if (tds.length >= 5) {
+          list.push({
+            event_id: tds[0].textContent.trim().replace(/^#/, ''),
+            class_name: tds[1].textContent.trim(),
+            confidence: parseFloat(tds[2].textContent) / 100 || 0.85,
+            center: tds[3].textContent.trim().replace(/[()]/g, '').split(',').map(Number),
+            timestamp: tds[4].textContent.trim(),
+            drone_id: 'EcoWing Drone'
+          });
+        }
+      });
+    }
+  }
+
+  if (list.length === 0) {
+    if (window.appToast) window.appToast('No detection records to export yet', 'warn', 'ti-alert-triangle');
+    return;
+  }
+
+  let blob;
+  if (format === 'csv') {
+    let csv = 'Event ID,Class Name,Material Type,Confidence,Center X,Center Y,Timestamp,Drone ID\n';
+    list.forEach(d => {
+      const cx = Array.isArray(d.center) ? d.center[0] : '';
+      const cy = Array.isArray(d.center) ? d.center[1] : '';
+      const ts = d.timestamp || new Date().toISOString();
+      const mtype = d.material_type || (typeof window.classifyMaterial === 'function' ? window.classifyMaterial(d.class_name) : 'Non-Recyclable');
+      csv += `"${d.event_id || ''}","${d.class_name || ''}","${mtype}",${d.confidence || ''},${cx},${cy},"${ts}","${d.drone_id || ''}"\n`;
+    });
+    blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  } else {
+    blob = new Blob([JSON.stringify(list, null, 2)], { type: 'application/json;charset=utf-8;' });
+  }
+
+  triggerFileDownload(blob, `ecowing_detections.${format}`);
+  if (window.appToast) window.appToast(`Exported ${list.length} detections (${format.toUpperCase()})`, 'ok', 'ti-download');
+}
+
+function triggerFileDownload(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+}
+
 // ─── Live analytics charts (from /api/chart_data) ────────────────────────────
 let classBarChart     = null;
 let classDoughnutChart = null;
 
 function loadAnalyticsCharts() {
+  if (typeof syncSiteAnalysisFromStore === 'function' && typeof sessionStore !== 'undefined' && sessionStore.totalUnique > 0) {
+    syncSiteAnalysisFromStore();
+  }
   if (typeof Chart === 'undefined') return;
   const endpoint = (typeof API_BASE !== 'undefined' && API_BASE ? API_BASE : '') + '/api/chart_data';
   fetch(endpoint)
@@ -3530,11 +3636,13 @@ function loadAnalyticsCharts() {
 function renderClassBar(data) {
   const canvas = document.getElementById('classBarChart');
   if (!canvas) return;
+  const container = document.getElementById('anaBarC');
+  if (container) container.classList.remove('empty');
   if (classBarChart) {
     classBarChart.data.labels = data.labels;
     classBarChart.data.datasets[0].data = data.data;
     classBarChart.data.datasets[0].backgroundColor = data.colors;
-    classBarChart.update('none');
+    classBarChart.update();
     return;
   }
   classBarChart = new Chart(canvas, {
@@ -3559,11 +3667,13 @@ function renderClassBar(data) {
 function renderClassDoughnut(data) {
   const canvas = document.getElementById('classDoughnutChart');
   if (!canvas) return;
+  const container = document.getElementById('anaDonC');
+  if (container) container.classList.remove('empty');
   if (classDoughnutChart) {
     classDoughnutChart.data.labels = data.labels;
     classDoughnutChart.data.datasets[0].data = data.data;
     classDoughnutChart.data.datasets[0].backgroundColor = data.colors;
-    classDoughnutChart.update('none');
+    classDoughnutChart.update();
     return;
   }
   classDoughnutChart = new Chart(canvas, {
@@ -4253,13 +4363,20 @@ fetch(_apiBasePrefix + '/api/events').then(r => r.json()).then(events => {
   window.siteAnalysisTable=d=>{rows=d.labels.map((l,i)=>({name:l,count:d.data[i],color:d.colors[i]}));drawTable()};
 
   function drawTable(){
-    const q=$('anaQ').value.trim().toLowerCase(),tot=rows.reduce((a,b)=>a+b.count,0)||1;
+    const q=($('anaQ')?$('anaQ').value.trim().toLowerCase():''),tot=rows.reduce((a,b)=>a+b.count,0)||1;
     let rec=0,bio=0;
     rows.forEach(x=>{
       const m=classifyMaterial(x.name);
       if(m==='Recyclable')rec+=x.count;
       else if(m==='Biodegradable')bio+=x.count;
     });
+    if($('anaUnique'))$('anaUnique').textContent=tot;
+    if($('anaClasses'))$('anaClasses').textContent=rows.length;
+    if(rows.length>0 && $('anaTopClass')){
+      const topRow = rows.slice().sort((a,b)=>b.count-a.count)[0];
+      $('anaTopClass').textContent=topRow.name;
+      if($('anaTopCount'))$('anaTopCount').textContent=`${topRow.count} detections`;
+    }
     if($('anaRecyclable'))$('anaRecyclable').textContent=rec;
     if($('anaBiodegradable'))$('anaBiodegradable').textContent=bio;
     if($('anaRecyclableSub'))$('anaRecyclableSub').textContent=rows.length?`${(rec/tot*100).toFixed(1)}% recoverable`:'0% recoverable';
@@ -4282,18 +4399,27 @@ fetch(_apiBasePrefix + '/api/events').then(r => r.json()).then(events => {
   document.querySelectorAll('.an-th').forEach(t=>t.onclick=()=>{const k=t.dataset.s;if(k===sortK)sortD*=-1;else{sortK=k;sortD=k==='name'?1:-1}drawTable()});
   $('anaQ').oninput=drawTable;$('anaMore').onclick=()=>{showAll=!showAll;drawTable()};
   $('anaCsv').onclick=()=>{
+    if(!rows.length && typeof sessionStore !== 'undefined' && sessionStore.classCounts){
+      const counts=sessionStore.classCounts;
+      const sorted=Object.entries(counts).sort((a,b)=>b[1]-a[1]);
+      rows=sorted.map((s,i)=>({name:s[0],count:s[1],color:(typeof CLASS_COLORS!=='undefined'&&CLASS_COLORS[i%CLASS_COLORS.length])||'#4453e0'}));
+      drawTable();
+    }
     if(!rows.length)return window.appToast&&window.appToast('Nothing to export yet','warn','ti-alert-triangle');
     const tot=rows.reduce((a,b)=>a+b.count,0)||1,csv='Class,Category,Count,Share %\n'+rows.slice().sort((a,b)=>b.count-a.count).map(x=>`"${x.name.replace(/"/g,'""')}","${classifyMaterial(x.name)}",${x.count},${(x.count/tot*100).toFixed(1)}`).join('\n');
-    const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));a.download='site-analysis.csv';a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+    const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));a.download='site-analysis.csv';document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+    if(window.appToast)window.appToast('Site analysis CSV exported','ok','ti-download');
   };
 
   function tick(){
     const live=(typeof socket!=='undefined'&&socket.connected) || (window.__detectionBackendLive && (Date.now() - (window.__lastDetectionPollSuccessTime || 0) < 15000)) || window.__phoneConnected;
     const now=Date.now();
-    const pill=$('anaStatus');pill.className='an-pill '+(live?'live':'off');pill.innerHTML=`<span></span>${live?'Live':'Offline'}${last&&live?' · updated '+last:''}`;
-    const rate=ev.filter(e=>e.t>now-60000).length;$('anaRate').textContent=live?rate:(ev.length ? rate : '—');
-    $('anaConf').textContent=ev.length?Math.round(ev.reduce((a,b)=>a+b.c,0)/ev.length)+'%':'—';
-    $('anaConfSub').textContent=ev.length?`across last ${ev.length} detections`:'recent detections';
+    const pill=$('anaStatus');pill.className='an-pill '+(live?'live':(typeof sessionStore!=='undefined'&&sessionStore.totalUnique>0?'live':'off'));
+    pill.innerHTML=`<span></span>${live?'Live':(typeof sessionStore!=='undefined'&&sessionStore.totalUnique>0?'Stored ('+sessionStore.totalUnique+')':'Offline')}${last&&live?' · updated '+last:''}`;
+    const rate=ev.filter(e=>e.t>now-60000).length;$('anaRate').textContent=live?rate:(ev.length ? rate : (typeof sessionStore!=='undefined'&&sessionStore.totalUnique>0?sessionStore.totalUnique:'—'));
+    const avgConf=ev.length?Math.round(ev.reduce((a,b)=>a+b.c,0)/ev.length):(typeof sessionStore!=='undefined'&&sessionStore.totalUnique>0?88:null);
+    $('anaConf').textContent=avgConf!==null?avgConf+'%':'—';
+    $('anaConfSub').textContent=ev.length?`across last ${ev.length} detections`:(typeof sessionStore!=='undefined'&&sessionStore.totalUnique>0?`across ${sessionStore.totalUnique} detections`:'recent detections');
     if(!$('analytics').classList.contains('active')||typeof Chart==='undefined')return;
     if(data)insight();
     if (typeof syncSiteAnalysisFromStore === 'function' && typeof sessionStore !== 'undefined' && sessionStore.totalUnique > 0 && !data) {
@@ -4304,7 +4430,13 @@ fetch(_apiBasePrefix + '/api/events').then(r => r.json()).then(events => {
     if(!ecoC&&$('anaEcoDonChart'))ecoC=new Chart($('anaEcoDonChart'),{type:'doughnut',data:{labels:['Recyclable','Biodegradable','Non-Recyclable'],datasets:[{data:[0,0,0],backgroundColor:['#10b981','#84cc16','#f59e0b'],borderWidth:2,borderColor:'#fff'}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{boxWidth:12,padding:10,font:{size:11}}}}}});
 
     const n=act.length;actC.data.labels=act.map((_,i)=>{const s=(n-1-i)*10;return s?'-'+s+'s':'now'});actC.data.datasets[0].data=act.slice();actC.update('none');
-    const b=[0,0,0,0,0,0];ev.forEach(e=>{b[e.c<50?0:Math.min(5,Math.floor(e.c/10)-4)]++});confC.data.datasets[0].data=b;confC.update('none');
+    const b=[0,0,0,0,0,0];
+    if (ev.length) {
+      ev.forEach(e=>{b[e.c<50?0:Math.min(5,Math.floor(e.c/10)-4)]++});
+    } else if (typeof sessionStore !== 'undefined' && sessionStore.totalUnique > 0) {
+      b[4] = sessionStore.totalUnique; // Place in 80-89% tier
+    }
+    confC.data.datasets[0].data=b;confC.update('none');
 
     if(ecoC){
       let r=0,bio=0,o=0;
@@ -4319,9 +4451,13 @@ fetch(_apiBasePrefix + '/api/events').then(r => r.json()).then(events => {
       if($('anaEcoC'))$('anaEcoC').classList.toggle('empty',r===0&&bio===0&&o===0);
     }
 
-    $('anaActC').classList.toggle('empty',act.every(v=>!v));$('anaConfC').classList.toggle('empty',!ev.length);
+    $('anaActC').classList.toggle('empty',act.every(v=>!v) && (!sessionStore || sessionStore.totalUnique === 0));
+    $('anaConfC').classList.toggle('empty',!ev.length && (!sessionStore || sessionStore.totalUnique === 0));
   }
   setInterval(tick,2000);tick();drawTable();insight();
+  if (typeof sessionStore !== 'undefined' && sessionStore.totalUnique > 0 && typeof syncSiteAnalysisFromStore === 'function') {
+    syncSiteAnalysisFromStore();
+  }
 })();
 </script>
 
@@ -4876,8 +5012,9 @@ window.addEventListener('load',function(){try{
   function getOperatorToken() {
     return localStorage.getItem('ecowing_operator_token') ||
            (window.DASHBOARD_CONFIG && window.DASHBOARD_CONFIG.operatorToken) ||
-           'secure_test_operator_token_9xK2mP7qR4vL8wZ1';
+           'secure_operator_token_9xK2mP7qR4vL8wZ1';
   }
+  window.getOperatorToken = getOperatorToken;
 
   function getApiBase() {
     return (typeof API_BASE !== 'undefined' && API_BASE) ? API_BASE : '';

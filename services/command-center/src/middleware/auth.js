@@ -43,7 +43,7 @@ function constantTimeCompare(a, b) {
 }
 
 function verifyOperatorToken(req, res, next) {
-  const token = req.headers['x-operator-token'];
+  const token = req.headers['x-operator-token'] || (req.query && req.query.token);
   if (!ECOWING_OPERATOR_TOKEN || !token) {
     return res.status(401).json({
       error: "Unauthorized: invalid or missing operator token. Provide 'X-Operator-Token' header."
