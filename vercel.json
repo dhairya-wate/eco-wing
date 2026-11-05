@@ -16,6 +16,18 @@
       "destination": "https://ecowing-detection-system.onrender.com/api/detections"
     },
     {
+      "source": "/api/stats",
+      "destination": "https://ecowing-detection-system.onrender.com/api/stats"
+    },
+    {
+      "source": "/api/chart_data",
+      "destination": "https://ecowing-detection-system.onrender.com/api/chart_data"
+    },
+    {
+      "source": "/api/events",
+      "destination": "https://ecowing-detection-system.onrender.com/api/events"
+    },
+    {
       "source": "/sensor",
       "destination": "/services/sensor/templates/index.html"
     },

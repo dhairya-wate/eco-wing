@@ -3186,15 +3186,175 @@ socket.on('new_detection', (event) => {
 
 socket.on('stats_update', updateAllStats);
 
+// ─── Real-Time Session Store & Detection Ingestion ──────────────────────────
+const CLASS_COLORS = [
+  '#4453e0', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6',
+  '#ec4899', '#06b6d4', '#84cc16', '#6366f1', '#14b8a6'
+];
+
+const sessionStore = {
+  totalUnique: 0,
+  classCounts: {},
+  events: []
+};
+
+function seedStoreFromEvents(events) {
+  if (!Array.isArray(events) || events.length === 0) return;
+  events.forEach(ev => {
+    const cname = ev.class_name || 'Unknown';
+    sessionStore.classCounts[cname] = (sessionStore.classCounts[cname] || 0) + 1;
+    sessionStore.totalUnique += 1;
+    sessionStore.events.push(ev);
+    if (window.pushSiteAnalysisEvent) {
+      window.pushSiteAnalysisEvent({
+        name: cname,
+        confidence: typeof ev.confidence === 'number' ? ev.confidence : 0.85,
+        t: Date.now() - 30000
+      });
+    }
+  });
+  updateMetricsFromStore();
+}
+
+function ingestDetectionItem(it, ts) {
+  const cname = it.name || it.class_name || it.raw_class || it.label || 'Unknown';
+  const conf = typeof it.confidence === 'number' ? it.confidence : 0.85;
+  let center = [0, 0];
+  if (Array.isArray(it.center)) {
+    center = it.center;
+  } else if (Array.isArray(it.bbox) && it.bbox.length >= 4) {
+    center = [
+      Math.round((it.bbox[1] + it.bbox[3]) / 2),
+      Math.round((it.bbox[0] + it.bbox[2]) / 2)
+    ];
+  } else if (it.bbox && typeof it.bbox === 'object') {
+    center = [
+      Math.round((it.bbox.y || 0) + (it.bbox.h || 0) / 2),
+      Math.round((it.bbox.x || 0) + (it.bbox.w || 0) / 2)
+    ];
+  }
+
+  let mtype = it.material_type || it.category;
+  const recStr = String(it.recyclable || '').toLowerCase();
+  const bioStr = String(it.biodegradable || '').toLowerCase();
+  if (['yes', 'true', 'estimated'].includes(recStr)) {
+    mtype = 'Recyclable';
+  } else if (['yes', 'true', 'estimated'].includes(bioStr)) {
+    mtype = 'Biodegradable';
+  } else if (!mtype || mtype === 'unknown') {
+    mtype = (typeof window.classifyMaterial === 'function') ? window.classifyMaterial(cname) : 'Non-Recyclable';
+  }
+
+  const eventId = String(it.id || it.event_id || ('EV-' + (sessionStore.totalUnique + 1000)));
+  const timeStr = (typeof ts === 'number' && ts > 0)
+    ? new Date(ts * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+    : new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
+  const evObj = {
+    event_id: eventId,
+    drone_id: it.drone_id || (window.__phoneConnected ? 'Mobile Phone' : 'EcoWing AI'),
+    class_name: cname,
+    material_type: mtype,
+    confidence: conf,
+    center: center,
+    timestamp: timeStr
+  };
+
+  // Prepend row to Flight tab feed
+  prependRow(evObj, true);
+
+  // Ingest into session store
+  sessionStore.classCounts[cname] = (sessionStore.classCounts[cname] || 0) + 1;
+  sessionStore.totalUnique += 1;
+  sessionStore.events.unshift(evObj);
+  if (sessionStore.events.length > 200) sessionStore.events.pop();
+
+  // Push to Site Analysis engine
+  if (window.pushSiteAnalysisEvent) {
+    window.pushSiteAnalysisEvent({
+      name: cname,
+      confidence: conf,
+      t: Date.now()
+    });
+  }
+
+  updateMetricsFromStore();
+}
+
+function updateMetricsFromStore() {
+  const counts = sessionStore.classCounts;
+  const total = sessionStore.totalUnique;
+  const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+
+  setEl('metricTotal', total);
+  setEl('anaUnique', total);
+  setEl('anaClasses', Object.keys(counts).length);
+  if (sorted.length > 0) {
+    setEl('anaTopClass', sorted[0][0]);
+    setEl('anaTopCount', `${sorted[0][1]} detections`);
+  }
+
+  if (window.siteAnalysisUpdate) {
+    window.siteAnalysisUpdate({
+      total_unique: total,
+      class_counts: counts
+    });
+  }
+
+  syncSiteAnalysisFromStore();
+}
+
+function syncSiteAnalysisFromStore() {
+  const counts = sessionStore.classCounts;
+  const keys = Object.keys(counts);
+  if (keys.length === 0) return;
+
+  const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+  const labels = sorted.map(s => s[0]);
+  const data = sorted.map(s => s[1]);
+  const colors = labels.map((_, i) => CLASS_COLORS[i % CLASS_COLORS.length]);
+
+  let rec = 0, bio = 0, other = 0;
+  labels.forEach((l, i) => {
+    const m = typeof window.classifyMaterial === 'function' ? window.classifyMaterial(l) : 'Non-Recyclable';
+    if (m === 'Recyclable') rec += data[i];
+    else if (m === 'Biodegradable') bio += data[i];
+    else other += data[i];
+  });
+
+  const chartPayload = {
+    labels: labels,
+    data: data,
+    colors: colors,
+    eco: {
+      labels: ['Recyclable', 'Biodegradable', 'Non-Recyclable'],
+      data: [rec, bio, other],
+      colors: ['#10b981', '#84cc16', '#f59e0b']
+    }
+  };
+
+  if (window.siteAnalysisPrep) window.siteAnalysisPrep(chartPayload);
+  renderClassBar(chartPayload);
+  renderClassDoughnut(chartPayload);
+  renderClassTable(chartPayload);
+}
+
 // Live Detection Telemetry & Video Feed from Detection System
 let lastDetectionTime = 0;
+let lastDetectionPollSuccessTime = 0;
 async function pollDetectionBackend() {
-  if (!API_BASE || phoneConnected) return;
+  if (phoneConnected) return;
+  const endpoint = (typeof API_BASE !== 'undefined' && API_BASE ? API_BASE : '') + '/api/detections';
   try {
-    const res = await fetch(API_BASE + '/api/detections');
+    const res = await fetch(endpoint);
     if (!res.ok) return;
     const json = await res.json();
     if (json.status !== 'success' || !json.data) return;
+
+    lastDetectionPollSuccessTime = Date.now();
+    window.__detectionBackendLive = true;
+    window.__lastDetectionPollSuccessTime = lastDetectionPollSuccessTime;
+    window.__phoneConnected = !!json.phone_connected;
 
     const data = json.data;
     const isLive = !json.stale;
@@ -3219,7 +3379,7 @@ async function pollDetectionBackend() {
     const feedImg = document.getElementById('liveFeedImg');
     if (feedImg && feedImg.style.display === 'none') feedImg.style.display = 'block';
 
-    // Ingest detected waste items into dashboard feed table
+    // Ingest detected waste items into dashboard feed table and analytics store
     if (data.items && data.items.length > 0 && json.timestamp !== lastDetectionTime) {
       lastDetectionTime = json.timestamp;
       if (!feedPlaceholderRemoved && feedBody) {
@@ -3227,15 +3387,7 @@ async function pollDetectionBackend() {
         feedPlaceholderRemoved = true;
       }
       data.items.forEach(it => {
-        prependRow({
-          event_id: Math.floor(Math.random() * 90000) + 10000,
-          drone_id: json.phone_connected ? 'Mobile Phone' : 'EcoWing AI',
-          class_name: it.name || it.raw_class,
-          material_type: it.category || (it.recyclable === 'yes' ? 'Recyclable' : 'Non-Recyclable'),
-          confidence: it.confidence || 0.85,
-          center: it.bbox ? [(it.bbox[0] + it.bbox[2])/2, (it.bbox[1] + it.bbox[3])/2] : [320, 240],
-          timestamp: new Date().toLocaleTimeString()
-        }, true);
+        ingestDetectionItem(it, json.timestamp);
       });
 
       const box = document.getElementById('liveFeedBox');
@@ -3346,16 +3498,33 @@ let classDoughnutChart = null;
 
 function loadAnalyticsCharts() {
   if (typeof Chart === 'undefined') return;
-  fetch(API_BASE + '/api/chart_data')
-    .then(r => r.json())
+  const endpoint = (typeof API_BASE !== 'undefined' && API_BASE ? API_BASE : '') + '/api/chart_data';
+  fetch(endpoint)
+    .then(r => {
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.json();
+    })
     .then(data => {
-      if (!data.labels || data.labels.length === 0) { if (window.siteAnalysisEmpty) window.siteAnalysisEmpty(); return; }
+      if (!data.labels || data.labels.length === 0) {
+        if (typeof sessionStore !== 'undefined' && sessionStore.totalUnique > 0) {
+          syncSiteAnalysisFromStore();
+        } else if (window.siteAnalysisEmpty) {
+          window.siteAnalysisEmpty();
+        }
+        return;
+      }
       if (window.siteAnalysisPrep) data = window.siteAnalysisPrep(data);
       renderClassBar(data);
       renderClassDoughnut(data);
       renderClassTable(data);
     })
-    .catch(() => { if (window.siteAnalysisOffline) window.siteAnalysisOffline(); });
+    .catch(() => {
+      if (typeof sessionStore !== 'undefined' && sessionStore.totalUnique > 0) {
+        syncSiteAnalysisFromStore();
+      } else if (window.siteAnalysisOffline) {
+        window.siteAnalysisOffline();
+      }
+    });
 }
 
 function renderClassBar(data) {
@@ -3415,11 +3584,15 @@ function renderClassTable(data) {
 }
 
 // ─── Initial data load on page open ──────────────────────────────────────────
-fetch(API_BASE + '/api/stats').then(r => r.json()).then(updateAllStats).catch(() => {});
-fetch(API_BASE + '/api/events').then(r => r.json()).then(events => {
-  if (events.length > 0) {
-    if (!feedPlaceholderRemoved) { feedBody.innerHTML = ''; feedPlaceholderRemoved = true; }
+const _apiBasePrefix = (typeof API_BASE !== 'undefined' && API_BASE ? API_BASE : '');
+fetch(_apiBasePrefix + '/api/stats').then(r => r.json()).then(updateAllStats).catch(() => {});
+fetch(_apiBasePrefix + '/api/events').then(r => r.json()).then(events => {
+  if (Array.isArray(events) && events.length > 0) {
+    if (!feedPlaceholderRemoved && feedBody) { feedBody.innerHTML = ''; feedPlaceholderRemoved = true; }
     events.slice(-MAX_FEED_ROWS).forEach(ev => prependRow(ev, false));
+    if (typeof seedStoreFromEvents === 'function') {
+      seedStoreFromEvents(events);
+    }
   }
 }).catch(() => {});
 </script>
@@ -3981,7 +4154,11 @@ fetch(API_BASE + '/api/events').then(r => r.json()).then(events => {
   const $=id=>document.getElementById(id);
   const esc=t=>String(t).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
   const ev=[];let cnt=0,act=Array(30).fill(0),rows=[],data=null,last='',sortK='count',sortD=-1,showAll=false,offline=false,actC=null,confC=null,ecoC=null;
-  const pushEv=(e,t)=>{ev.push({c:Math.round((e.confidence||0)*100),t});if(ev.length>500)ev.shift()};
+  const pushEv=(e,t)=>{
+    const conf = typeof e.confidence === 'number' ? Math.round(e.confidence * (e.confidence <= 1.0 ? 100 : 1)) : (typeof e.c === 'number' ? e.c : 85);
+    ev.push({c:conf, t:t || Date.now()});
+    if(ev.length>500)ev.shift();
+  };
 
   const classifyMaterial=name=>{
     const s=String(name||'').toLowerCase().replace(/[-_]/g,' ');
@@ -3990,14 +4167,30 @@ fetch(API_BASE + '/api/events').then(r => r.json()).then(events => {
     if(s.includes('plastic')&&!s.includes('bag')&&!s.includes('wrap')&&!s.includes('film')) return 'Recyclable';
     return 'Non-Recyclable';
   };
+  window.classifyMaterial = classifyMaterial;
 
-  fetch(API_BASE + '/api/events').then(r=>r.json()).then(a=>a.slice(-200).forEach(e=>pushEv(e,0))).catch(()=>{});
+  window.pushSiteAnalysisEvent = (e) => {
+    pushEv(e, (e && e.t) || Date.now());
+    cnt++;
+    offline = false;
+    last = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  };
+
+  const _initialEventsPrefix = (typeof API_BASE !== 'undefined' && API_BASE ? API_BASE : '');
+  fetch(_initialEventsPrefix + '/api/events').then(r=>r.json()).then(a=>{
+    if (Array.isArray(a)) {
+      a.slice(-200).forEach(e=>pushEv(e,0));
+      if (typeof seedStoreFromEvents === 'function' && a.length > 0) {
+        seedStoreFromEvents(a);
+      }
+    }
+  }).catch(()=>{});
   try{socket.on('new_detection',e=>{pushEv(e,Date.now());cnt++})}catch(e){}
   setInterval(()=>{act.push(cnt);cnt=0;act.shift()},10000);
 
   function insight(){
     const el=$('anaInsight');
-    if(offline){el.innerHTML='<span class="fc-chip bad"><i class="ti ti-plug-off"></i>Can’t reach the detection backend</span>';return}
+    if(offline && (!sessionStore || sessionStore.totalUnique === 0)){el.innerHTML='<span class="fc-chip bad"><i class="ti ti-plug-off"></i>Can’t reach the detection backend</span>';return}
     if(!data){el.innerHTML='<span class="fc-chip"><i class="ti ti-info-circle"></i>Waiting for detections…</span>';return}
     const tot=data.data.reduce((a,b)=>a+b,0)||1,top=Math.round(data.data[0]/tot*100);
     let rec=0,bio=0;
@@ -4023,6 +4216,11 @@ fetch(API_BASE + '/api/events').then(r => r.json()).then(events => {
     insight();return data;
   };
   window.siteAnalysisEmpty=()=>{
+    if (typeof sessionStore !== 'undefined' && sessionStore && sessionStore.totalUnique > 0) {
+      offline = false;
+      syncSiteAnalysisFromStore();
+      return;
+    }
     offline=false;data=null;rows=[];
     $('anaBarC').classList.add('empty');$('anaDonC').classList.add('empty');
     if($('anaEcoC'))$('anaEcoC').classList.add('empty');
@@ -4032,8 +4230,26 @@ fetch(API_BASE + '/api/events').then(r => r.json()).then(events => {
     if($('anaBiodegradableSub'))$('anaBiodegradableSub').textContent='0% compostable';
     drawTable();insight();
   };
-  window.siteAnalysisOffline=()=>{offline=true;['anaUnique','anaClasses','anaTopClass','anaFps','anaRecyclable','anaBiodegradable'].forEach(i=>{const e=$(i);if(e&&e.querySelector('.skel'))e.textContent='—'});insight()};
-  window.siteAnalysisUpdate=()=>{offline=false;last=new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'})};
+  window.siteAnalysisOffline=()=>{
+    if (typeof sessionStore !== 'undefined' && sessionStore && sessionStore.totalUnique > 0) {
+      offline = false;
+      syncSiteAnalysisFromStore();
+      return;
+    }
+    offline=true;['anaUnique','anaClasses','anaTopClass','anaFps','anaRecyclable','anaBiodegradable'].forEach(i=>{const e=$(i);if(e&&e.querySelector('.skel'))e.textContent='—'});insight();
+  };
+  window.siteAnalysisUpdate=(stats)=>{
+    offline=false;
+    last=new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'});
+    if(stats && stats.class_counts){
+      const counts=stats.class_counts;
+      const sorted=Object.entries(counts).sort((a,b)=>b[1]-a[1]);
+      const labels=sorted.map(s=>s[0]);
+      const d=sorted.map(s=>s[1]);
+      rows=labels.map((l,i)=>({name:l,count:d[i],color:(CLASS_COLORS && CLASS_COLORS[i % CLASS_COLORS.length])||'#4453e0'}));
+      drawTable();
+    }
+  };
   window.siteAnalysisTable=d=>{rows=d.labels.map((l,i)=>({name:l,count:d.data[i],color:d.colors[i]}));drawTable()};
 
   function drawTable(){
@@ -4072,13 +4288,17 @@ fetch(API_BASE + '/api/events').then(r => r.json()).then(events => {
   };
 
   function tick(){
-    const live=typeof socket!=='undefined'&&socket.connected,now=Date.now();
+    const live=(typeof socket!=='undefined'&&socket.connected) || (window.__detectionBackendLive && (Date.now() - (window.__lastDetectionPollSuccessTime || 0) < 15000)) || window.__phoneConnected;
+    const now=Date.now();
     const pill=$('anaStatus');pill.className='an-pill '+(live?'live':'off');pill.innerHTML=`<span></span>${live?'Live':'Offline'}${last&&live?' · updated '+last:''}`;
-    const rate=ev.filter(e=>e.t>now-60000).length;$('anaRate').textContent=live?rate:'—';
+    const rate=ev.filter(e=>e.t>now-60000).length;$('anaRate').textContent=live?rate:(ev.length ? rate : '—');
     $('anaConf').textContent=ev.length?Math.round(ev.reduce((a,b)=>a+b.c,0)/ev.length)+'%':'—';
     $('anaConfSub').textContent=ev.length?`across last ${ev.length} detections`:'recent detections';
     if(!$('analytics').classList.contains('active')||typeof Chart==='undefined')return;
     if(data)insight();
+    if (typeof syncSiteAnalysisFromStore === 'function' && typeof sessionStore !== 'undefined' && sessionStore.totalUnique > 0 && !data) {
+      syncSiteAnalysisFromStore();
+    }
     if(!actC)actC=new Chart($('anaActChart'),{type:'line',data:{labels:[],datasets:[{data:[],borderColor:'#4453e0',backgroundColor:'rgba(68,83,224,.12)',fill:true,tension:.35,pointRadius:0,borderWidth:2}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{beginAtZero:true,ticks:{precision:0}},x:{ticks:{maxTicksLimit:6}}}}});
     if(!confC)confC=new Chart($('anaConfChart'),{type:'bar',data:{labels:['<50%','50–59','60–69','70–79','80–89','90+'],datasets:[{data:[0,0,0,0,0,0],backgroundColor:['#ef4444','#f59e0b','#facc15','#84cc16','#22c55e','#10b981'],borderRadius:4}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{beginAtZero:true,ticks:{precision:0}}}}});
     if(!ecoC&&$('anaEcoDonChart'))ecoC=new Chart($('anaEcoDonChart'),{type:'doughnut',data:{labels:['Recyclable','Biodegradable','Non-Recyclable'],datasets:[{data:[0,0,0],backgroundColor:['#10b981','#84cc16','#f59e0b'],borderWidth:2,borderColor:'#fff'}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{boxWidth:12,padding:10,font:{size:11}}}}}});
